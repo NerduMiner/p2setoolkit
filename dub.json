@@ -1,0 +1,9 @@
+{
+	"authors": [
+		"NerduMiner"
+	],
+	"copyright": "Copyright © 2021, NerduMiner",
+	"description": "A tool that can dissassemble and reassemble Pikmin 2's sound effect BMS.",
+	"license": "AGPL-3.0",
+	"name": "p2setoolkit"
+}
