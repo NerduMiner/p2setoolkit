@@ -13,6 +13,7 @@ enum BMSFunction : ubyte
     NOTE_OFF = 0x81, //0x81-0x87, 0x89-0x8F
     CMD_WAIT16 = 0x88,
     SETPARAM_UNK = 0x90, //0x90-0x9F cmdSetParam
+    SETPARAM_91 = 0x91,
     PERF_U8_NODUR = 0x94, //Come from Xayr's Documents
     PERF_U8_DUR_U8 = 0x96,
     PERF_U8_DUR_U16 = 0x97,
@@ -44,6 +45,7 @@ enum BMSFunction : ubyte
     OPENTRACK = 0xC1,
     OPENTRACKBROS = 0xC2,
     CALL = 0xC4,
+    RETURN_NOARG = 0xC5,
     RETURN = 0xC6,
     JMP = 0xC8,
     LOOP_S = 0xC9,
@@ -108,6 +110,8 @@ ubyte parseOpcode(ubyte opcode)
     }
     if (opcode >= 0x90 && opcode < 0xA0) { //0x90-0x9F are cmdSetParam commands
         switch (opcode) {
+            case BMSFunction.SETPARAM_91:
+                return BMSFunction.SETPARAM_91;
             case BMSFunction.PERF_U8_NODUR:
                 return BMSFunction.PERF_U8_NODUR;
             case BMSFunction.PERF_U8_DUR_U8:
@@ -127,7 +131,7 @@ ubyte parseOpcode(ubyte opcode)
             case BMSFunction.PERF_S16_DUR_U16:
                 return BMSFunction.PERF_S16_DUR_U16;
             default:
-                return BMSFunction.SETPARAM_UNK;
+                throw new Exception("UNIMPLEMENTED 0x9X OPCODE IN PARSER: " ~ format!"%02X"(opcode));
         }
     }
     if (opcode >= 0xA0 && opcode < 0xB0) { //0xA0-0xAF are cmdWriteRegParam commands
@@ -163,7 +167,7 @@ ubyte parseOpcode(ubyte opcode)
             case BMSFunction.PARAM_CMP_16:
                 return BMSFunction.PARAM_CMP_16;
             default:
-                return BMSFunction.PARAM_UNKNOWN;
+                throw new Exception("UNIMPLEMENTED 0xAX OPCODE IN PARSER: " ~ format!"%02X"(opcode));
         }
     }
     if (opcode >= 0xB0 && opcode < 0xC0) { //0xB0-0xBF are the very funny commands
@@ -175,7 +179,7 @@ ubyte parseOpcode(ubyte opcode)
             case BMSFunction.OPOVERRIDE_2:
                 return BMSFunction.OPOVERRIDE_2;
             default:
-                throw new Exception("UNIMPLEMENTED 0XBX OPCODE IN PARSER: " ~ format!"%02X"(opcode));
+                throw new Exception("UNIMPLEMENTED 0xBX OPCODE IN PARSER: " ~ format!"%02X"(opcode));
         }
     }
     switch (opcode) { //For opcodes 0x80, 0x88, 0xC0-0xFF
@@ -187,6 +191,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.OPENTRACK;
         case BMSFunction.CALL:
             return BMSFunction.CALL;
+        case BMSFunction.RETURN_NOARG:
+            return BMSFunction.RETURN_NOARG;
         case BMSFunction.RETURN:
             return BMSFunction.RETURN;
         case BMSFunction.JMP:
@@ -195,12 +201,20 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.READPORT;
         case BMSFunction.WRITEPORT:
             return BMSFunction.WRITEPORT;
+        case BMSFunction.CMD_WAITR:
+            return BMSFunction.CMD_WAITR;
+        case BMSFunction.CHILDWRITEPORT:
+            return BMSFunction.CHILDWRITEPORT;
+        case BMSFunction.CLOSETRACK:
+            return BMSFunction.CLOSETRACK;
         case BMSFunction.OUTSWITCH:
             return BMSFunction.OUTSWITCH;
         case BMSFunction.BUSCONNECT:
             return BMSFunction.BUSCONNECT;
         case BMSFunction.SETINTERRUPT:
             return BMSFunction.SETINTERRUPT;
+        case BMSFunction.CLRI:
+            return BMSFunction.CLRI;
         case BMSFunction.RETI:
             return BMSFunction.RETI;
         case BMSFunction.INTTIMER:
@@ -209,6 +223,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.SYNCCPU;
         case BMSFunction.WAIT_VLQ:
             return BMSFunction.WAIT_VLQ;
+        case BMSFunction.EXTSET:
+            return BMSFunction.EXTSET;
         case BMSFunction.PANSWSET:
             return BMSFunction.PANSWSET;
         case BMSFunction.OSCROUTE:
@@ -265,13 +281,34 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             }
         }
         write("\n"); //Add a newline after we're done
-        //writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
         return;
     }
-    if ((opcode > 0x80 && opcode < 0x88) || (opcode > 0x88 && opcode < 0x90)) { //0x81-0x87, 0x89-0x8F are cmdNoteOff commands {
+    if ((opcode > 0x80 && opcode < 0x88) || (opcode > 0x88 && opcode < 0x90)) { //0x81-0x87, 0x89-0x8F are cmdNoteOff commands
         //Opcode contains which voice to stop, you can check this via AND-ing with 0x0F
         writeln("BMS Instruction: ", format!"%02X "(opcode));
         return;
+    }
+    if (opcode >= 0x90 && opcode < 0xA0) { //Opcodes 0x90-0x9F are a part of the perf family
+        switch(opcode) {
+            case BMSFunction.SETPARAM_91:
+                //Read something[ubyte] and something[ubyte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S8_NODUR: //0x98
+                //Read param[ubyte] and value[byte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+                return;
+            default:
+                throw new Exception("UNIMPLEMENTED PERF OPCODE IN INSRTUCTION PARSER: " ~ format!"%02X"(opcode));
+        }
     }
     switch (opcode) {
         case BMSFunction.CMD_WAIT8: //0x80
@@ -335,6 +372,15 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             //Shorts have to be read as 2 ubytes
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.PARAM_ADD_16: //0xAD
+            //Read target register[ubyte] and value[short]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            //Shorts have to be read as 2 ubytes
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
         case BMSFunction.OPOVERRIDE_1: //0xB0
             /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
             writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
@@ -386,12 +432,35 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             return;
         case BMSFunction.CALL: //0xC4
             //Read condition?[ubyte] and address[int24] and something?[ubyte]
+            //C4 C0 is Call Register Table, so we also have to check for that
             ubyte[] data;
-            data.length = 4;
+            data.length = 1;
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
+            ubyte arg = reader.read!(ubyte);
+            write("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(arg));
+            if (arg == 0xC0) {
+                //Read register[ubyte] and address[int24]
+                data = [];
+                data.length = 4;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            } else {
+                //read address[int24] and something[ubyte]
+                data = [];
+                data.length = 3;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            }
             //int24 have to be read as 3 ubytes
-            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            //writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            write("\n");
+            return;
+        case BMSFunction.RETURN_NOARG: //0xC5
+            //Has no arguments
+            writeln("BMS Instruction: ", format!"%02X "(opcode));
             return;
         case BMSFunction.RETURN: //0xC6
             //Read condition[byte]
@@ -426,6 +495,30 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.CMD_WAITR: //0xCF
+            //Read register[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CHILDWRITEPORT: //0xD2
+            //Read port[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CLOSETRACK: //0xDA
+            //Read track-id[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
+            return;
         case BMSFunction.OUTSWITCH: //0xDB
             //Read something[ubyte]
             ubyte[] data;
@@ -450,6 +543,10 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.CLRI: //0xE1
+            //Apparently has no arguments
+            writeln("BMS Instruction: ", format!"%02X "(opcode));
+            return;
         case BMSFunction.RETI: //0xE3
             //Apparently has no arguments
             writeln("BMS Instruction: ", format!"%02X "(opcode));
@@ -469,6 +566,35 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.WAIT_VLQ: //0xEA
+            //Variable length Quantity means we have to do funky stuff
+            int vlq;
+            int temp;
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            temp = reader.read!(ubyte);
+            write("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(temp));
+            do {
+                vlq = (vlq << 7) | (temp & 0x7F);
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                temp = reader.read!(ubyte);
+                write(format!"%02X "(temp));
+            } while ((temp & 0x80) > 0);
+            write("\n"); //Add a newline after we're done
+            return;
+        case BMSFunction.EXTSET: //0xEE
+            //Reads an address?[int16]
+            ubyte[] data;
+            data.length = 2; //Could also be 3
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)));
             return;
         case BMSFunction.PANSWSET: //0xEF
             //Reads an int24? for something

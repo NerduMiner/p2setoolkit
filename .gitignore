@@ -20,3 +20,5 @@ tdmextractor-test-*
 *.o
 *.obj
 *.lst
+
+*.bms
