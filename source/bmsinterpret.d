@@ -230,12 +230,42 @@ ubyte parseOpcode(ubyte opcode)
 ///Takes a BMS opcode and prints out its full instruction in hex bytes
 void printBMSInstruction (ubyte opcode, File bmsFile) {
     if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands, so handle those first
-        //Read voice[ubyte] and velocity[ubyte]
+        //Read flags[ubyte] and velocity[ubyte]
         ubyte[] data;
         data.length = 2;
         auto reader = binaryReader(data);
         bmsFile.rawRead(data);
-        writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+        ubyte flags = reader.read!(ubyte);
+        ubyte velocity = reader.read!(ubyte);
+        write("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(flags), format!"%02X "(velocity)); //Put down what we have, as there may be more in the future
+        if ((flags & 7) == 0) {
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            ubyte header = reader.read!(ubyte);
+            //InstructionDecompiler: check header & 0x80 != 0
+            for (int i = 0; i < (flags >> 3 & 3); i++) { //upper nybble of opcode contains how many extra bytes we have to read
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)));
+            }
+        } else {
+            ubyte topnybble = flags >> 3 & 3;
+            if (topnybble - 1 > 7)
+                throw new Exception("Invalid parameters in flag byte for cmdNoteOn command.");
+            if ((flags >> 5 & 1) != 0) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)));
+            }
+        }
+        write("\n"); //Add a newline after we're done
+        //writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
         return;
     }
     if ((opcode > 0x80 && opcode < 0x88) || (opcode > 0x88 && opcode < 0x90)) { //0x81-0x87, 0x89-0x8F are cmdNoteOff commands {
