@@ -11,6 +11,7 @@ import std.getopt;
 import std.path;
 import std.stdio;
 import std.string;
+//import vibe.data.json;
 
 int main(string[] args)
 {
@@ -37,6 +38,15 @@ int main(string[] args)
 ///Decompiles a BMS file, creating an editable text based format in the process
 int decompileBMS(string filename) {
     File bms = File(filename, "rb");
+    File bmsinfo = File(filename ~ ".info", "r");
+    const int dataAmnt = to!int(bmsinfo.readln().strip());
+    BMSDataInfo[] bmsInfo;
+    bmsInfo.length = dataAmnt;
+    for(int i = 0; i < dataAmnt; i++) {
+        bmsInfo[i].position = to!int(bmsinfo.readln().strip());
+        bmsInfo[i].dataType = bmsinfo.readln().strip();
+        bmsInfo[i].dataLength = to!int(bmsinfo.readln().strip());
+    }
     //Prepare binaryReader
     ubyte[] data;
     data.length = 1;
@@ -46,7 +56,7 @@ int decompileBMS(string filename) {
         bms.rawRead(data);
         const ubyte opcode = reader.read!ubyte();
         const ubyte bmsInstruction = parseOpcode(opcode);
-        printBMSInstruction(bmsInstruction, bms);
+        printBMSInstruction(bmsInstruction, bms, bmsInfo);
         data = [];
         data.length = 1;
         reader.source(data);

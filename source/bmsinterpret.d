@@ -5,6 +5,16 @@ import std.file;
 import std.format;
 import std.stdio;
 
+///Needed to know what block of arbitrary data we are looking out for next
+int dataInfoPosition = 0;
+
+///Details what kind of arbitrary data is in the BMS file and at what point in the file it resides
+struct BMSDataInfo {
+    int position;
+    string dataType;
+    int dataLength;
+}
+
 ///A list of functions paired with their BMS Opcode, some opcodes come from https://github.com/XAYRGA/JaiSeqX/blob/sxlja/JaiSeqXLJA/libJAudio/Sequence/JAISeqEvent.cs
 enum BMSFunction : ubyte 
 {
@@ -205,6 +215,10 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.CMD_WAITR;
         case BMSFunction.CHILDWRITEPORT:
             return BMSFunction.CHILDWRITEPORT;
+        case BMSFunction.SIMPLEADSR:
+            return BMSFunction.SIMPLEADSR;
+        case BMSFunction.TRANSPOSE:
+            return BMSFunction.TRANSPOSE;
         case BMSFunction.CLOSETRACK:
             return BMSFunction.CLOSETRACK;
         case BMSFunction.OUTSWITCH:
@@ -219,6 +233,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.RETI;
         case BMSFunction.INTTIMER:
             return BMSFunction.INTTIMER;
+        case BMSFunction.VIBDEPTH:
+            return BMSFunction.VIBDEPTH;
         case BMSFunction.SYNCCPU:
             return BMSFunction.SYNCCPU;
         case BMSFunction.WAIT_VLQ:
@@ -244,7 +260,16 @@ ubyte parseOpcode(ubyte opcode)
 }
 
 ///Takes a BMS opcode and prints out its full instruction in hex bytes
-void printBMSInstruction (ubyte opcode, File bmsFile) {
+void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
+    //We need to make sure that we aren't reading arbitrary data first, so do a check before parsing an instruction
+    if (bmsFile.tell() == bmsInfo[dataInfoPosition].position) {
+        writeln("Detected special data block.");
+        if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
+            HandleBMSJumpTable(bmsFile, bmsInfo);
+        }
+        dataInfoPosition += 1;
+        return;
+    }
     if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands, so handle those first
         //Read flags[ubyte] and velocity[ubyte]
         ubyte[] data;
@@ -305,6 +330,22 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
                 auto reader = binaryReader(data);
                 bmsFile.rawRead(data);
                 writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S8_DUR_U8: //0x9A
+                //Read param[ubyte] value[byte] and duration ticks[ubyte]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S16_NODUR: //0x9C
+                //Read param[ubyte] and value[short]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
                 return;
             default:
                 throw new Exception("UNIMPLEMENTED PERF OPCODE IN INSRTUCTION PARSER: " ~ format!"%02X"(opcode));
@@ -511,6 +552,22 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.SIMPLEADSR: //0xD8
+            //Read A[ubyte] D[ubyte] S[ubyte] and R[ubyte]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.TRANSPOSE: //0xD9
+            //Read transpose[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
+            return;
         case BMSFunction.CLOSETRACK: //0xDA
             //Read track-id[ubyte]
             ubyte[] data;
@@ -558,6 +615,14 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
             writeln("BMS Instruction(E4 Not Fully Accurate): ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.VIBDEPTH: //0xE5
+            //Read something?[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
             return;
         case BMSFunction.SYNCCPU: //0xE7
             //Read maximum wait[short]
@@ -645,4 +710,20 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
         default:
             throw new Exception("UNIMPLEMENTED OPCODE IN INSTRUCTION PRINTER: " ~ format!"%02X"(opcode));
     }
+}
+
+///A function that handles jump tables in a BMS file
+void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
+    writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
+    //Jumptables are incremental, when you find that the next value is lower
+    //than the one you have, you reached the end of the current jumptable
+    write("Jumptable: ");
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++) {
+        ubyte[] data;
+        data.length = 1;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        write(format!"%02X "(reader.read!(ubyte)));
+    }
+    write("\n");
 }
