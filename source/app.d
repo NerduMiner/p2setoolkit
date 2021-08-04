@@ -42,6 +42,7 @@ int decompileBMS(string filename) {
     const int dataAmnt = to!int(bmsinfo.readln().strip());
     BMSDataInfo[] bmsInfo;
     bmsInfo.length = dataAmnt;
+    writeln(dataAmnt, " override[s] found for this bms file.");
     for(int i = 0; i < dataAmnt; i++) {
         bmsInfo[i].position = to!int(bmsinfo.readln().strip());
         bmsInfo[i].dataType = bmsinfo.readln().strip();
@@ -53,6 +54,18 @@ int decompileBMS(string filename) {
     auto reader = binaryReader(data);
     while (!bms.eof()) {
         writeln("At ", format!"%X"(bms.tell), " in file.");
+        //We need to make sure that we aren't reading arbitrary data first, so do a check before parsing an instruction
+        if (bms.tell() == bmsInfo[dataInfoPosition].position) {
+            writeln("Detected special data block.");
+            if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
+                HandleBMSJumpTable(bms, bmsInfo);
+            }
+            if (bmsInfo[dataInfoPosition].dataType == "padding") {
+                HandleBMSPadding(bms, bmsInfo);
+            }
+            dataInfoPosition += 1;
+            continue;
+        }
         bms.rawRead(data);
         const ubyte opcode = reader.read!ubyte();
         const ubyte bmsInstruction = parseOpcode(opcode);

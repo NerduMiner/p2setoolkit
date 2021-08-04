@@ -18,7 +18,8 @@ struct BMSDataInfo {
 ///A list of functions paired with their BMS Opcode, some opcodes come from https://github.com/XAYRGA/JaiSeqX/blob/sxlja/JaiSeqXLJA/libJAudio/Sequence/JAISeqEvent.cs
 enum BMSFunction : ubyte 
 {
-    NOTE_ON = 0x00, //0x00-0x7F
+    INVALID = 0x00, //0x00-0x7F
+    NOTE_ON = 0x01, 
     CMD_WAIT8 = 0x80,
     NOTE_OFF = 0x81, //0x81-0x87, 0x89-0x8F
     CMD_WAIT16 = 0x88,
@@ -41,7 +42,7 @@ enum BMSFunction : ubyte
     PARAM_ADD_8 = 0xA5,
     PARAM_MUL_8 = 0xA6,
     PARAM_CMP_8 = 0xA7,
-    PARAM_UNKNOWN = 0xA8,
+    PARAM_LOAD_UNK = 0xA8,
     PARAM_BITWISE = 0xA9,
     PARAM_LOADTBL = 0xAA,
     PARAM_SUBTRACT = 0xAB,
@@ -112,6 +113,9 @@ enum BMSFunction : ubyte
 ///Parses a BMS opcode, returning a relevant enum function value
 ubyte parseOpcode(ubyte opcode) 
 {
+    if (opcode == BMSFunction.INVALID) { //For the most part 00 always means a misalignment occured
+        throw new Exception("0x00 CAUGHT, MISALIGNMENT POSSIBLY OCCURED.");
+    }
     if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands
         return opcode; //We'll just have to do a similar check again
     }
@@ -162,6 +166,8 @@ ubyte parseOpcode(ubyte opcode)
                 return BMSFunction.PARAM_MUL_8;
             case BMSFunction.PARAM_CMP_8:
                 return BMSFunction.PARAM_CMP_8;
+            case BMSFunction.PARAM_LOAD_UNK:
+                return BMSFunction.PARAM_LOAD_UNK;
             case BMSFunction.PARAM_BITWISE:
                 return BMSFunction.PARAM_BITWISE;
             case BMSFunction.PARAM_LOADTBL:
@@ -215,6 +221,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.CMD_WAITR;
         case BMSFunction.CHILDWRITEPORT:
             return BMSFunction.CHILDWRITEPORT;
+        case BMSFunction.SIMPLEENV:
+            return BMSFunction.SIMPLEENV;
         case BMSFunction.SIMPLEADSR:
             return BMSFunction.SIMPLEADSR;
         case BMSFunction.TRANSPOSE:
@@ -247,6 +255,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.OSCROUTE;
         case BMSFunction.IIRCUTOFF:
             return BMSFunction.IIRCUTOFF;
+        case BMSFunction.VIBPITCH:
+            return BMSFunction.VIBPITCH;
         case BMSFunction.TEMPO:
             return BMSFunction.TEMPO;
         case BMSFunction.TIMEBASE:
@@ -385,6 +395,14 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.PARAM_ADD_8: //0xA5
+            //Read target register[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
         case BMSFunction.PARAM_CMP_8: //0xA7
             //Read target register[ubyte] and value[ubyte]
             ubyte[] data;
@@ -393,13 +411,21 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
-        case BMSFunction.PARAM_BITWISE: //0xA9
-            //Read something[ubyte] and something[ubyte](operation and register?)
+        case BMSFunction.PARAM_LOAD_UNK: //0xA8
+            //Read something[ubyte] and something[ubyte]
             ubyte[] data;
             data.length = 2;
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_BITWISE: //0xA9
+            //Read something[ubyte] and something[short](operation and register?)
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
         case BMSFunction.PARAM_LOADTBL: //0xAA
             //Read
@@ -552,13 +578,27 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
-        case BMSFunction.SIMPLEADSR: //0xD8
-            //Read A[ubyte] D[ubyte] S[ubyte] and R[ubyte]
+        case BMSFunction.SIMPLEENV: //0xD7
+            //Read Something?[int24]
             ubyte[] data;
-            data.length = 4;
+            data.length = 3;
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
-            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SIMPLEADSR: //0xD8
+            //Read A[ubyte] D[ubyte] S[ubyte] and R[ubyte]: Xayrs version
+            //Read 5 shorts: debugging Pikmin 2, Yoshi2's version
+            ubyte[] data;
+            data.length = 10;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            //idk why but here it clashes with std.file.write
+            std.stdio.write("BMS Instruction: ", format!"%02X "(opcode));
+            for (int i = 0; i < data.length; i++) {
+                write(format!"%02X "(reader.read!(ubyte)));
+            }
+            write("\n");
             return;
         case BMSFunction.TRANSPOSE: //0xD9
             //Read transpose[ubyte]
@@ -685,6 +725,14 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction(F1 not fully accurate): ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.VIBPITCH: //0xF4
+            //Read something?[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
+            return;
         case BMSFunction.TEMPO: //0xFD
             //Read tempo value[short]
             ubyte[] data;
@@ -726,4 +774,15 @@ void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
         write(format!"%02X "(reader.read!(ubyte)));
     }
     write("\n");
+}
+
+///A function that handles padding in a BMS file
+void HandleBMSPadding(File bmsFile, BMSDataInfo[] bmsinfo) { 
+    writeln("BMS PADDING DTECTED: SKIPPING PADDING");
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++) {
+        ubyte[] data;
+        data.length = 1;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+    }
 }
