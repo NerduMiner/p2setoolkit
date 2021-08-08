@@ -56,12 +56,32 @@ int decompileBMS(string filename) {
         writeln("At ", format!"%X"(bms.tell), " in file.");
         //We need to make sure that we aren't reading arbitrary data first, so do a check before parsing an instruction
         if (bms.tell() == bmsInfo[dataInfoPosition].position) {
-            writeln("Detected special data block.");
+            writeln("Detected special data block at ", bms.tell(), ".");
+            writeln("Data Type: ", bmsInfo[dataInfoPosition].dataType);
+            if (bmsInfo[dataInfoPosition].dataType == "data") {
+                HandleBMSArbitraryData(bms, bmsInfo);
+            }
             if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
                 HandleBMSJumpTable(bms, bmsInfo);
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
                 HandleBMSPadding(bms, bmsInfo);
+            }
+            if (bmsInfo[dataInfoPosition].dataType == "a5_3bytearg_override") {
+                bms.rawRead(data);
+                const ubyte opcode = reader.read!ubyte();
+                A53ByteArgOverride(bms, opcode);
+                data = [];
+                data.length = 1;
+                reader.source(data);
+            }
+            if (bmsInfo[dataInfoPosition].dataType == "a8_3bytearg_override") {
+                bms.rawRead(data);
+                const ubyte opcode = reader.read!ubyte();
+                A83ByteArgOverride(bms, opcode);
+                data = [];
+                data.length = 1;
+                reader.source(data);
             }
             dataInfoPosition += 1;
             continue;
