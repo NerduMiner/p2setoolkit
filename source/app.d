@@ -39,6 +39,7 @@ int main(string[] args)
 int decompileBMS(string filename) {
     File bms = File(filename, "rb");
     File bmsinfo = File(filename ~ ".info", "r");
+    File decompiledBMS = File(filename ~ ".txt", "w");
     const int dataAmnt = to!int(bmsinfo.readln().strip());
     BMSDataInfo[] bmsInfo;
     bmsInfo.length = dataAmnt;
@@ -62,7 +63,8 @@ int decompileBMS(string filename) {
                 HandleBMSArbitraryData(bms, bmsInfo);
             }
             if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
-                HandleBMSJumpTable(bms, bmsInfo);
+                //HandleBMSJumpTable(bms, bmsInfo);
+                HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo);
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
                 HandleBMSPadding(bms, bmsInfo);
@@ -70,7 +72,8 @@ int decompileBMS(string filename) {
             if (bmsInfo[dataInfoPosition].dataType == "a5_3bytearg_override") {
                 bms.rawRead(data);
                 const ubyte opcode = reader.read!ubyte();
-                A53ByteArgOverride(bms, opcode);
+                //A53ByteArgOverride(bms, opcode);
+                A53ByteArgOverrideFile(bms, decompiledBMS, opcode);
                 data = [];
                 data.length = 1;
                 reader.source(data);
@@ -78,7 +81,8 @@ int decompileBMS(string filename) {
             if (bmsInfo[dataInfoPosition].dataType == "a8_3bytearg_override") {
                 bms.rawRead(data);
                 const ubyte opcode = reader.read!ubyte();
-                A83ByteArgOverride(bms, opcode);
+                //A83ByteArgOverride(bms, opcode);
+                A83ByteArgOverrideFile(bms, decompiledBMS, opcode);
                 data = [];
                 data.length = 1;
                 reader.source(data);
@@ -89,7 +93,8 @@ int decompileBMS(string filename) {
         bms.rawRead(data);
         const ubyte opcode = reader.read!ubyte();
         const ubyte bmsInstruction = parseOpcode(opcode);
-        printBMSInstruction(bmsInstruction, bms, bmsInfo);
+        //printBMSInstruction(bmsInstruction, bms);
+        decompileBMSInstruction(bmsInstruction, bms, decompiledBMS);
         data = [];
         data.length = 1;
         reader.source(data);

@@ -1,5 +1,6 @@
 module bmsinterpret;
 import binary.reader;
+import binary.common;
 import std.exception;
 import std.file;
 import std.format;
@@ -115,8 +116,9 @@ enum BMSFunction : ubyte
 ///Parses a BMS opcode, returning a relevant enum function value
 ubyte parseOpcode(ubyte opcode) 
 {
-    if (opcode == BMSFunction.INVALID) { //For the most part 00 always means a misalignment occured
-        throw new Exception("0x00 CAUGHT, MISALIGNMENT POSSIBLY OCCURED.");
+    if (opcode == BMSFunction.INVALID) { //For the most part 00 always means a misalignment occured, BUT it could also mean a noteOn command
+        writeln("0x00 CAUGHT, MISALIGNMENT POSSIBLY OCCURED.");
+        return opcode;
     }
     if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands
         return opcode; //We'll just have to do a similar check again
@@ -281,6 +283,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.IIRCUTOFF;
         case BMSFunction.VIBPITCH:
             return BMSFunction.VIBPITCH;
+        case BMSFunction.PRINTF:
+            return BMSFunction.PRINTF;
         case BMSFunction.TEMPO:
             return BMSFunction.TEMPO;
         case BMSFunction.TIMEBASE:
@@ -294,7 +298,56 @@ ubyte parseOpcode(ubyte opcode)
 }
 
 ///Takes a BMS opcode and prints out its full instruction in hex bytes
-void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
+void printBMSInstruction (ubyte opcode, File bmsFile) {
+    if (opcode == 0x00) {
+        //First check if we are near end of file
+        if ((bmsFile.size - bmsFile.tell()) < 32) {
+            //Get out of the function because we are in padding, but we still have to read one byte
+            ubyte[1] data;
+            bmsFile.rawRead(data);
+            return;
+        }
+        //Print out 00 instruction to user
+        //Read flags[ubyte] and velocity[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        const ubyte flags = reader.read!(ubyte);
+        const ubyte velocity = reader.read!(ubyte);
+        write("BMS 0x00 Parsed Instruction: ", format!"%02X "(opcode), format!"%02X "(flags), format!"%02X "(velocity)); //Put down what we have, as there may be more in the future
+        if ((flags & 7) == 0) {
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            const ubyte header = reader.read!(ubyte);
+            write(format!"%02X "(header));
+            //InstructionDecompiler: check header & 0x80 != 0
+            for (int i = 0; i < (flags >> 3 & 3); i++) { //upper nybble of opcode contains how many extra bytes we have to read
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)));
+            }
+        } else {
+            const ubyte topnybble = flags >> 3 & 3;
+            if (topnybble - 1 > 7)
+                throw new Exception("Invalid parameters in flag byte for cmdNoteOn command.");
+            if ((flags >> 5 & 1) != 0) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                write(format!"%02X "(reader.read!(ubyte)));
+            }
+        }
+        write("\n"); //Add a newline after we're done
+        writeln("Do you want to continue? Press Enter to Continue or Close Program");
+        readln();
+        return;
+    }
     if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands, so handle those first
         //Read flags[ubyte] and velocity[ubyte]
         ubyte[] data;
@@ -374,6 +427,14 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
                 auto reader = binaryReader(data);
                 bmsFile.rawRead(data);
                 writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_U8_NODUR: //0x94
+                //Read param[ubyte] and value[ubyte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
                 return;
             case BMSFunction.PERF_U8_DUR_U8: //0x96
                 //Read param[ubyte], value[ubyte] and duration_ticks[ubyte]
@@ -502,7 +563,7 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
         case BMSFunction.PARAM_BITWISE: //0xA9
-            //Read operation[ubyte] and something[short](operation and register?), if operation & 0x0F == 0xC then read another short, otherwise read another byte
+            //Read operation[ubyte] and something[short](operation and register?), if operation & 0x0F == 0xC then read another short, if operation & 0x0F == 0x8, then stop, otherwise read another byte
             ubyte[] data;
             data.length = 1;
             auto reader = binaryReader(data);
@@ -514,6 +575,12 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
                 reader.source(data);
                 bmsFile.rawRead(data);
                 writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(operation), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            } else if ((operation & 0xF) == 0x8) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(operation), format!"%02X"(reader.read!(ubyte)));
             } else {
                 data = [];
                 data.length = 2;
@@ -815,7 +882,7 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             writeln("BMS Instruction: ", format!"%02X "(opcode));
             return;
         case BMSFunction.WAIT_VLQ: //0xEA
-            //Variable length Quantity means we have to do funky stuff
+            /*Variable length Quantity means we have to do funky stuff
             int vlq;
             int temp;
             ubyte[] data;
@@ -833,7 +900,13 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
                 temp = reader.read!(ubyte);
                 write(format!"%02X "(temp));
             } while ((temp & 0x80) > 0);
-            write("\n"); //Add a newline after we're done
+            write("\n"); //Add a newline after we're done*/
+            //Read wait time[int24]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             return;
         case BMSFunction.PANPOWSET: //0xEB
             //Read 5 ubytes
@@ -896,6 +969,35 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
             bmsFile.rawRead(data);
             writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X"(reader.read!(ubyte)));
             return;
+        case BMSFunction.PRINTF: //0xFB
+            //Read until read byte is 00, then read one more byte
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            ubyte nxtByte = reader.read!(ubyte);
+            std.stdio.write("BMS Instruction: ", format!"%02X "(opcode));
+            while (nxtByte != 0x00) {
+                write(format!"%02X "(nxtByte));
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                nxtByte = reader.read!(ubyte);
+            }
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            ubyte finalByte = reader.read!(ubyte);
+            if (finalByte == 0x00) {
+                writeln(format!"%02X "(nxtByte), format!"%02X"(finalByte));
+            } else {
+                //Go back one byte because sometimes there isnt an extra 00
+                bmsFile.seek(bmsFile.tell() - 1);
+                writeln(format!"%02X"(nxtByte));
+            }
+            return;
         case BMSFunction.TEMPO: //0xFD
             //Read tempo value[short]
             ubyte[] data;
@@ -923,6 +1025,722 @@ void printBMSInstruction (ubyte opcode, File bmsFile, BMSDataInfo[] bmsInfo) {
     }
 }
 
+///Takes an opcode and decompiles it, writing the instruction to an output file
+void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS) {
+    if (opcode == 0x00) {
+        //First check if we are near end of file
+        if ((bmsFile.size - bmsFile.tell()) < 32) {
+            //Get out of the function because we are in padding, but we still have to read one byte
+            ubyte[1] data;
+            bmsFile.rawRead(data);
+            return;
+        }
+        //Print out 00 instruction to user
+        //Read flags[ubyte] and velocity[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data, ByteOrder.BigEndian);
+        bmsFile.rawRead(data);
+        const ubyte flags = reader.read!(ubyte);
+        const ubyte velocity = reader.read!(ubyte);
+        decompiledBMS.write("noteon ", opcode, "b ", flags, "b ", velocity, "b "); //Put down what we have, as there may be more in the future
+        if ((flags & 7) == 0) {
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            const ubyte header = reader.read!(ubyte);
+            decompiledBMS.write(header, "b ");
+            //InstructionDecompiler: check header & 0x80 != 0
+            for (int i = 0; i < (flags >> 3 & 3); i++) { //upper nybble of opcode contains how many extra bytes we have to read
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(reader.read!(ubyte), "b ");
+            }
+        } else {
+            const ubyte topnybble = flags >> 3 & 3;
+            if (topnybble - 1 > 7)
+                throw new Exception("Invalid parameters in flag byte for cmdNoteOn command.");
+            if ((flags >> 5 & 1) != 0) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(reader.read!(ubyte), "b ");
+            }
+        }
+        decompiledBMS.write("\n"); //Add a newline after we're done
+        return;
+    }
+    if (opcode < 0x80) { //0x00-0x7F are cmdNoteOn commands, so handle those first
+        //Read flags[ubyte] and velocity[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data, ByteOrder.BigEndian);
+        bmsFile.rawRead(data);
+        const ubyte flags = reader.read!(ubyte);
+        const ubyte velocity = reader.read!(ubyte);
+        decompiledBMS.write("noteon ", opcode, "b ", flags, "b ", velocity, "b "); //Put down what we have, as there may be more in the future
+        if ((flags & 7) == 0) {
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            const ubyte header = reader.read!(ubyte);
+            decompiledBMS.write(header, "b ");
+            //InstructionDecompiler: check header & 0x80 != 0
+            for (int i = 0; i < (flags >> 3 & 3); i++) { //upper nybble of opcode contains how many extra bytes we have to read
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(reader.read!(ubyte), "b ");
+            }
+        } else {
+            const ubyte topnybble = flags >> 3 & 3;
+            if (topnybble - 1 > 7)
+                throw new Exception("Invalid parameters in flag byte for cmdNoteOn command.");
+            if ((flags >> 5 & 1) != 0) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(reader.read!(ubyte), "b ");
+            }
+        }
+        decompiledBMS.write("\n"); //Add a newline after we're done
+        return;
+    }
+    if ((opcode > 0x80 && opcode < 0x88) || (opcode > 0x88 && opcode < 0x90)) { //0x81-0x87, 0x89-0x8F are cmdNoteOff commands
+        //Opcode contains which voice to stop, you can check this via AND-ing with 0x0F
+        //If bit 4 is set in the argument, read an extra byte
+        if ((opcode & 0x8) > 0) {
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("noteoff ", (opcode & 0xF), "b ", reader.read!(ubyte));
+            return;
+        } else {
+            decompiledBMS.writeln("noteoff ", (opcode & 0xF), "b");
+        }
+        return;
+    }
+    if (opcode >= 0x90 && opcode < 0xA0) { //Opcodes 0x90-0x9F are a part of the perf family
+        switch(opcode) {
+            case BMSFunction.SETPARAM_90: //0x90
+                //Read something[ubyte] and something[ubyte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data, ByteOrder.BigEndian);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("setparam_90 ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.SETPARAM_91: //0x91
+                //Read something[ubyte] and something[ubyte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("setparam_91 ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.SETPARAM_92: //0x92
+                //Read something[ubyte], something[ubyte], and something[ubyte]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("setparam_92 ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_U8_NODUR: //0x94
+                //Read param[ubyte] and value[ubyte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_u8_nodur ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_U8_DUR_U8: //0x96
+                //Read param[ubyte], value[ubyte] and duration_ticks[ubyte]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_u8_dur_u8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S8_NODUR: //0x98
+                //Read param[ubyte] and value[byte]
+                ubyte[] data;
+                data.length = 2;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s8_nodur ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(byte)));
+                return;
+            case BMSFunction.PERF_S8_DUR_U8: //0x9A
+                //Read param[ubyte] value[byte] and duration ticks[ubyte]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s8_dur_u8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(byte)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S8_DUR_U16: //0x9B
+                //Read param[ubyte], value[byte], and duration_ticks[ushort]
+                ubyte[] data;
+                data.length = 4;
+                auto reader = binaryReader(data, ByteOrder.BigEndian);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s8_dur_u16 ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(byte)), format!"%sh"(reader.read!(ushort)));
+                return;
+            case BMSFunction.PERF_S16_NODUR: //0x9C
+                //Read param[ubyte] and value[short]
+                ubyte[] data;
+                data.length = 3;
+                auto reader = binaryReader(data, ByteOrder.BigEndian);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s16_nodur ", format!"%sb "(reader.read!(ubyte)), format!"%sh"(reader.read!(short)));
+                return;
+            case BMSFunction.PERF_S16_DUR_U8_9E: //0x9E
+                //Read param[ubyte], value[short], and duration_ticks[ubyte]
+                ubyte[] data;
+                data.length = 4;
+                auto reader = binaryReader(data, ByteOrder.BigEndian);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s16_dur_u8 ", format!"%sb "(reader.read!(ubyte)), format!"%sh "(reader.read!(short)), format!"%sb"(reader.read!(ubyte)));
+                return;
+            case BMSFunction.PERF_S16_DUR_U16: //0x9F
+                //Read param[ubyte], value[short], and duration_ticks[ushort]
+                ubyte[] data;
+                data.length = 5;
+                auto reader = binaryReader(data, ByteOrder.BigEndian);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("perf_s16_dur_u16 ", format!"%sb "(reader.read!(ubyte)), format!"%sh "(reader.read!(short)), format!"%sh "(reader.read!(ushort)));
+                return;
+            default:
+                throw new Exception("UNIMPLEMENTED PERF OPCODE IN INSRTUCTION PARSER: " ~ format!"%02X"(opcode));
+        }
+    }
+    switch (opcode) {
+        case BMSFunction.CMD_WAIT8: //0x80
+            //Read wait time[byte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("wait8 ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CMD_WAIT16: //0x88
+            //Read wait time[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("wait16 ", format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.PARAM_SET_R: //0xA0
+            //Read source register[ubyte] and destination register[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_set_r ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_CMP_R: //0xA3
+            //Read target register[ubyte] and source register[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_cmp_r ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_SET_8: //0xA4
+            //Read target register[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_set_8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_ADD_8: //0xA5
+            //Read target register[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_add_8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_CMP_8: //0xA7
+            //Read target register[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_cmp_8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_LOAD_UNK: //0xA8
+            //Read something[ubyte] and something[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_load ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_BITWISE: //0xA9
+            //Read operation[ubyte] and something[ubyte?](operation and register?), if operation & 0x0F == 0xC then read another short, if operation & 0x0F == 0x8, then stop, otherwise read another byte
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            ubyte operation = reader.read!(ubyte);
+            if ((operation & 0xF) == 0xC) {
+                data = [];
+                data.length = 3;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("param_bitwise ",  format!"%sb "(operation), format!"%sb "(reader.read!(ubyte)), format!"%sh"(reader.read!(ushort)));
+            } else if ((operation & 0xF) == 0x8) {
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("param_bitwise ", format!"%sb "(operation), format!"%sb"(reader.read!(ubyte)));
+            } else {
+                data = [];
+                data.length = 2;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.writeln("param_bitwise ", format!"%sb "(operation), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            }
+            return;
+        case BMSFunction.PARAM_LOADTBL: //0xAA
+            throw new Exception("0xAA CAUGHT BUT NOT HANDLED IN INSTRUCTION DECOMPILER");
+        case BMSFunction.PARAM_SUBTRACT: //0xAB
+            //Read target register[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_subtract ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PARAM_SET_16: //0xAC
+            //Read target register[ubyte] and value[short]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_set_16 ", format!"%sb "(reader.read!(ubyte)), format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.PARAM_ADD_16: //0xAD
+            //Read target register[ubyte] and value[short]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("param_add_16 ", format!"%sb "(reader.read!(ubyte)), format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.OPOVERRIDE_1: //0xB0
+            /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
+            writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
+            //Read opcode
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            printBMSInstruction(reader.read!(ubyte), bmsFile);
+            //Read argument[ubyte]
+            data = [];
+            data.length = 1;
+            bmsFile.rawRead(data);
+            reader.source(data);
+            writeln("0xB0 Arguments: ", format!"%02X "(reader.read!(ubyte)));
+            return;*/
+            //ACTUALLY 0xBX commands have an overrided opcode[ubyte], an argument mask[ubyte], then an argument for the 0xBX opcode[ubyte]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("op_override_1 ", format!"%02X "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.OPOVERRIDE_2: //0xB1?
+            throw new Exception("CONFIRM BEHAVIOR OF THIS 0xBX OPCODE FIRST: " ~ format!"%02X"(opcode));
+            /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
+            writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
+            //Read opcode
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            printBMSInstruction(reader.read!(ubyte), bmsFile);
+            //Read arguments[ubyte x2]
+            data = [];
+            data.length = 2;
+            bmsFile.rawRead(data);
+            reader.source(data);
+            writeln("0xB0 Arguments: ", format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;*/
+        case BMSFunction.OPENTRACK: //0xC1
+            //Read track id[ubyte] and address[int24]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            //int24 has to be read as a ubyte bitshifted left by 16 and OR'd with a ushort
+            decompiledBMS.writeln("opentrack ", format!"%sb "(reader.read!(ubyte)), format!"%sq "((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        case BMSFunction.CALL: //0xC4
+            //Read condition?[ubyte] and address[int24] and something?[ubyte]
+            //C4 C0 is Call Register Table, so we also have to check for that
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            const ubyte arg = reader.read!(ubyte);
+            decompiledBMS.write("call ", format!"%sb "(arg));
+            if (arg == 0xC0) {
+                //Read register[ubyte] and address[int24]
+                data = [];
+                data.length = 4;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(format!"%sb "(reader.read!(ubyte)), format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            } else {
+                //read address[int24]
+                data = [];
+                data.length = 3;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                decompiledBMS.write(format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            }
+            decompiledBMS.write("\n");
+            return;
+        case BMSFunction.RETURN_NOARG: //0xC5
+            //Has no arguments
+            decompiledBMS.writeln("return_noarg");
+            return;
+        case BMSFunction.RETURN: //0xC6
+            //Read condition[byte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("return ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.JMP: //0xC8
+            //Read condition?[ubyte] and address[int24]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            //int24 have to be read as 3 ubytes
+            decompiledBMS.writeln("jmp ", format!"%sb "(reader.read!(ubyte)), format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        case BMSFunction.LOOP_S: //0xC9
+            //Read something?[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("loop_s ", format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.LOOP_E: //0xCA
+            //Apparently has no arguments
+            decompiledBMS.writeln("loop_e");
+            return;
+        case BMSFunction.READPORT: //0xCB
+            //Read flags[ubyte] and target register[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("readport ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.WRITEPORT: //0xCC
+            //Read port[ubyte] and value[ubyte](also known as source port and dest port)
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("writeport ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CMD_WAITR: //0xCF
+            //Read register[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("wait_r ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CHILDWRITEPORT: //0xD2
+            //Read port[ubyte] and value[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("childwriteport ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SETLASTNOTE: //0xD4
+            //Read something[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("setlastnote ", format!"%s"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SIMPLEOSC: //0xD6
+            //Read something[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("simpleosc ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SIMPLEENV: //0xD7
+            //Read Something?[int24] and something?[ubyte]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("simpleenv ", format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SIMPLEADSR: //0xD8
+            //Read A[ubyte] D[ubyte] S[ubyte] and R[ubyte]: Xayrs version
+            //Read 5 shorts: debugging Pikmin 2, Yoshi2's version
+            ubyte[] data;
+            data.length = 10;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.write("simpleadsr ");
+            for (int i = 0; i < (data.length / 2); i++) {
+                decompiledBMS.write(format!"%sh "(reader.read!(ushort)));
+            }
+            decompiledBMS.write("\n");
+            return;
+        case BMSFunction.TRANSPOSE: //0xD9
+            //Read transpose[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("transpose ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.CLOSETRACK: //0xDA
+            //Read track-id[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("closetrack ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.OUTSWITCH: //0xDB
+            //Read something[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("outswitch ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.BUSCONNECT: //0xDD
+            //Read something[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("busconnect ", format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.SETINTERRUPT: //0xDF
+            //Read interrupt level[byte] and address[int24]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("setinterrupt ", format!"%sb "(reader.read!(ubyte)), format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        case BMSFunction.CLRI: //0xE1
+            //Apparently has no arguments
+            decompiledBMS.writeln("clri");
+            return;
+        case BMSFunction.RETI: //0xE3
+            //Apparently has no arguments
+            decompiledBMS.writeln("reti");
+            return;
+        case BMSFunction.INTTIMER: //0xE4
+            //Read something[byte] and extra short?
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("inttimer ", format!"%sb "(reader.read!(ubyte)), format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.VIBDEPTH: //0xE5
+            //Read something?[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("vibdepth ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.VIBDEPTHMIDI: //0xE6
+            //Read something[ubyte] and something[ubyte]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("vibdepthmidi ", format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.SYNCCPU: //0xE7
+            //Read maximum wait[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("synccpu ", format!"%sh"(reader.read!(ushort)));
+            return;
+        case BMSFunction.FLUSHALL: //0xE8
+            //cmdFlushAll has no arguments
+            decompiledBMS.writeln("flushall");
+            return;
+        case BMSFunction.WAIT_VLQ: //0xEA
+            /*Variable length Quantity means we have to do funky stuff
+            int vlq;
+            ubyte temp;
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            temp = reader.read!(ubyte);
+            decompiledBMS.write("wait_vlq ");
+            do {
+                vlq = (vlq << 7) | (temp & 0x7F);
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                temp = reader.read!(ubyte);
+            } while ((temp & 0x80) > 0);
+            decompiledBMS.writeln(format!"%svlq"(vlq));*/
+            //Read wait time[int24]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("wait_EA ", format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        case BMSFunction.PANPOWSET: //0xEB
+            //Read 5 ubytes
+            ubyte[] data;
+            data.length = 5;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("panpowset ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.IIRSET: //0xEC
+            //Read 8 ubytes
+            ubyte[] data;
+            data.length = 8;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.write("iirset ");
+            for (int i = 0; i < data.length; i++) {
+                decompiledBMS.write(format!"%sb "(reader.read!(ubyte)));
+            }
+            decompiledBMS.write("\n");
+            return;
+        case BMSFunction.EXTSET: //0xEE
+            //Reads an address?[int16]
+            ubyte[] data;
+            data.length = 2; //Could also be 3
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("extset ", format!"%sb"(reader.read!(ushort)));
+            return;
+        case BMSFunction.PANSWSET: //0xEF
+            //Reads an int24? for something
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("panswset ", format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        case BMSFunction.OSCROUTE: //0xF0
+            //Read something[byte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("oscroute ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.IIRCUTOFF: //0xF1
+            //Read something[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("iircutoff ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.VIBPITCH: //0xF4
+            //Read something?[ubyte]
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("vibpitch ", format!"%sb"(reader.read!(ubyte)));
+            return;
+        case BMSFunction.PRINTF: //0xFB
+            //Read until read byte is 00, then read one more byte
+            ubyte[] data;
+            data.length = 1;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            ubyte nxtByte = reader.read!(ubyte);
+            decompiledBMS.write("printf ");
+            while (nxtByte != 0x00) {
+                decompiledBMS.write(format!"%c"(cast(char)nxtByte));
+                data = [];
+                data.length = 1;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                nxtByte = reader.read!(ubyte);
+            }
+            data = [];
+            data.length = 1;
+            reader.source(data);
+            bmsFile.rawRead(data);
+            ubyte finalByte = reader.read!(ubyte);
+            if (finalByte == 0x00) {
+                decompiledBMS.writeln(format!"%c "(cast(char)nxtByte), format!"%c"(cast(char)finalByte));
+            } else {
+                //Go back one byte because sometimes there isnt an extra 00
+                bmsFile.seek(bmsFile.tell() - 1);
+                decompiledBMS.writeln(format!"%c"(cast(char)nxtByte));
+            }
+            return;
+        case BMSFunction.TEMPO: //0xFD
+            //Read tempo value[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("tempo ", format!"%sh"(reader.read!(ushort)));
+            return; 
+        case BMSFunction.TIMEBASE: //0xFE
+            //Read timebase value[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("timebase ", format!"%sh "(reader.read!(ushort)));
+            return;
+        case BMSFunction.FINISH:
+            //cmdFinish has no arguments
+            decompiledBMS.writeln("finish");
+            return;
+        default:
+            throw new Exception("UNIMPLEMENTED OPCODE IN INSTRUCTION PRINTER: " ~ format!"%02X"(opcode));
+    }
+}
+
 ///A function that handles jump tables in a BMS file
 void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
     writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
@@ -937,6 +1755,22 @@ void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
         write(format!"%02X "(reader.read!(ubyte)));
     }
     write("\n");
+}
+
+///A function that handles jump tables in a BMS file and outputs it to a decompiled BMS file
+void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo) {
+    writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
+    //Jumptables are incremental, when you find that the next value is lower
+    //than the one you have, you reached the end of the current jumptable
+    decompiledBMS.write("Jumptable: ");
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++) {
+        ubyte[] data;
+        data.length = 1;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.write(format!"%02X "(reader.read!(ubyte)));
+    }
+    decompiledBMS.write("\n");
 }
 
 ///A function that handles uncategorized data in a BMS file that should still be outputted
@@ -975,6 +1809,18 @@ void A53ByteArgOverride(File bmsFile, ubyte opcode) {
     return;
 }
 
+///A command parser override for 0xA5 that reads 3 bytes of arguments instead of 2, outputting a decompiled form to a decompiled BMS file TODO: remove the need for this function
+void A53ByteArgOverrideFile(File bmsFile, File decompiledBMS, ubyte opcode) {
+    writeln("0xA5 3 BYTE ARGUMENT OVERRIDE. PLEASE IMPLEMENT ACCURATE PARSING FOR 0xA5 IN THE FUTURE");
+    //Read target register[ubyte] and value[ubyte] and something?[ubyte]
+    ubyte[] data;
+    data.length = 3;
+    auto reader = binaryReader(data);
+    bmsFile.rawRead(data);
+    decompiledBMS.writeln("param_add_8 ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
+    return;
+}
+
 ///A command parser override for 0xA8 that reads 3 bytes of arguments instead of 2 TODO: remove the need for this function
 void A83ByteArgOverride(File bmsFile, ubyte opcode) {
     writeln("0xA8 3 BYTE ARGUMENT OVERRIDE. PLEASE IMPLEMENT ACCURATE PARSING FOR 0xA8 IN THE FUTURE");
@@ -984,5 +1830,17 @@ void A83ByteArgOverride(File bmsFile, ubyte opcode) {
     auto reader = binaryReader(data);
     bmsFile.rawRead(data);
     writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+    return;
+}
+
+///A command parser override for 0xA8 that reads 3 bytes of arguments instead of 2, outputting the decompiled form to a decompiled BMS file TODO: remove the need for this function
+void A83ByteArgOverrideFile(File bmsFile, File decompiledBMS, ubyte opcode) {
+    writeln("0xA8 3 BYTE ARGUMENT OVERRIDE. PLEASE IMPLEMENT ACCURATE PARSING FOR 0xA8 IN THE FUTURE");
+    //Read target register[ubyte] and value[ubyte] and something?[ubyte]
+    ubyte[] data;
+    data.length = 3;
+    auto reader = binaryReader(data);
+    bmsFile.rawRead(data);
+    decompiledBMS.writeln("param_load ", format!"%sb "(reader.read!(ubyte)), format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
     return;
 }
