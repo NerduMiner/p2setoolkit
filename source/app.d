@@ -20,12 +20,15 @@ int main(string[] args)
         writeln("No arguments given. Please provide BMS/Decomp TXT.");
         return 1;
     }
-    string filename = "filename.bms";
+    string filename = "se.bms";
+    string task = "decompile";
     int workSuccess;
-    auto const argInfo = getopt(args, "input", &filename);
+    auto const argInfo = getopt(args, "input", &filename, "task", &task);
     if (extension(filename) == ".bms") {
+        if (task != "print" && task != "decompile")
+            throw new Exception("Task argument must either be 'print' or 'decompile'");
         writeln("Decompiling BMS...");
-        workSuccess = decompileBMS(filename);
+        workSuccess = decompileBMS(filename, task);
         return workSuccess;
     } else if (extension(filename) == ".txt") {
         writeln("Recompiling BMS...");
@@ -35,13 +38,15 @@ int main(string[] args)
     return 1;
 }
 
-///Decompiles a BMS file, creating an editable text based format in the process
-int decompileBMS(string filename) {
+///Decompiles a BMS file, either creating an editable text based format or printing out instructions in the process
+int decompileBMS(string filename, string task) {
     File bms = File(filename, "rb");
     File bmsinfo = File(filename ~ ".info", "r");
     File decompiledBMS = File(filename ~ ".txt", "w");
     const int dataAmnt = to!int(bmsinfo.readln().strip());
     BMSDataInfo[] bmsInfo;
+    BMSLabel[] decompiledLabels;
+    ulong[ulong] addressLookUptable;
     bmsInfo.length = dataAmnt;
     writeln(dataAmnt, " override[s] found for this bms file.");
     for(int i = 0; i < dataAmnt; i++) {
@@ -54,7 +59,14 @@ int decompileBMS(string filename) {
     data.length = 1;
     auto reader = binaryReader(data);
     while (!bms.eof()) {
-        writeln("At ", format!"%X"(bms.tell), " in file.");
+        /*if(bms.tell() >= 15331) {
+            readln();
+            writeln("At ", format!"%X"(bms.tell), " in file.");
+        }*/
+        //writeln("At ", format!"%X"(bms.tell), " in file.");
+        //We need to check if we're at a spot in the file where a label should be dropped
+        //FIRST check if we are at a label position as long as we actually have some
+        addressLookUptable[bms.tell()] = decompiledBMS.tell();
         //We need to make sure that we aren't reading arbitrary data first, so do a check before parsing an instruction
         if (bms.tell() == bmsInfo[dataInfoPosition].position) {
             writeln("Detected special data block at ", bms.tell(), ".");
@@ -63,8 +75,11 @@ int decompileBMS(string filename) {
                 HandleBMSArbitraryData(bms, bmsInfo);
             }
             if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
-                //HandleBMSJumpTable(bms, bmsInfo);
-                HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo);
+                if (task == "print") {
+                    HandleBMSJumpTable(bms, bmsInfo);
+                } else if (task == "decompile") {
+                    HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo, addressLookUptable);
+                }
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
                 HandleBMSPadding(bms, bmsInfo);
@@ -72,8 +87,11 @@ int decompileBMS(string filename) {
             if (bmsInfo[dataInfoPosition].dataType == "a5_3bytearg_override") {
                 bms.rawRead(data);
                 const ubyte opcode = reader.read!ubyte();
-                //A53ByteArgOverride(bms, opcode);
-                A53ByteArgOverrideFile(bms, decompiledBMS, opcode);
+                if (task == "print") {
+                    A53ByteArgOverride(bms, opcode);
+                } else if (task == "decompile") {
+                    A53ByteArgOverrideFile(bms, decompiledBMS);
+                }
                 data = [];
                 data.length = 1;
                 reader.source(data);
@@ -81,8 +99,11 @@ int decompileBMS(string filename) {
             if (bmsInfo[dataInfoPosition].dataType == "a8_3bytearg_override") {
                 bms.rawRead(data);
                 const ubyte opcode = reader.read!ubyte();
-                //A83ByteArgOverride(bms, opcode);
-                A83ByteArgOverrideFile(bms, decompiledBMS, opcode);
+                if (task == "print") {
+                    A83ByteArgOverride(bms, opcode);
+                } else if (task == "decompile") {
+                    A83ByteArgOverrideFile(bms, decompiledBMS, opcode);
+                }
                 data = [];
                 data.length = 1;
                 reader.source(data);
@@ -93,11 +114,31 @@ int decompileBMS(string filename) {
         bms.rawRead(data);
         const ubyte opcode = reader.read!ubyte();
         const ubyte bmsInstruction = parseOpcode(opcode);
-        //printBMSInstruction(bmsInstruction, bms);
-        decompileBMSInstruction(bmsInstruction, bms, decompiledBMS);
+        if (task == "print") {
+            printBMSInstruction(bmsInstruction, bms);
+        } else if (task == "decompile") {
+            decompileBMSInstruction(bmsInstruction, bms, decompiledBMS, &decompiledLabels);
+        }
         data = [];
         data.length = 1;
         reader.source(data);
+    }
+    decompiledBMS.reopen(null, "r+");
+    decompiledLabels.sort();
+    writefln("Adding %s labels...THIS MAY TAKE TIME", decompiledLabels.length);
+    foreach(label; decompiledLabels) {
+        //writeln(label.position);
+        if (bms.tell() > label.position) {
+            //writefln("Appending label %s at %s", label.labelname, addressLookUptable[label.position]);
+            decompiledBMS.seek(addressLookUptable[label.position]);
+            string buffer;
+            foreach(line; decompiledBMS.byLine) {
+                buffer ~= line ~ "\n";
+            }
+            decompiledBMS.seek(addressLookUptable[label.position]);
+            decompiledBMS.write(label.labelname ~ "\n" ~ buffer);
+            buffer = "";
+        }
     }
     writeln("Finished Decompiling!");
     return 0;

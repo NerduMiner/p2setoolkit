@@ -1,6 +1,7 @@
 module bmsinterpret;
 import binary.reader;
 import binary.common;
+import std.algorithm;
 import std.exception;
 import std.file;
 import std.format;
@@ -14,6 +15,16 @@ struct BMSDataInfo {
     int position;
     string dataType;
     int dataLength;
+}
+
+///Details the information needed to make a label, namely its name and its position in the file
+struct BMSLabel {
+    string labelname;
+    int position;
+    int opCmp(BMSLabel)(const BMSLabel other) const
+    {
+        return (this.position < other.position) - (this.position > other.position);
+    }
 }
 
 ///A list of functions paired with their BMS Opcode, some opcodes come from https://github.com/XAYRGA/JaiSeqX/blob/sxlja/JaiSeqXLJA/libJAudio/Sequence/JAISeqEvent.cs
@@ -673,7 +684,7 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             data.length = 1;
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
-            ubyte arg = reader.read!(ubyte);
+            const ubyte arg = reader.read!(ubyte);
             write("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(arg));
             if (arg == 0xC0) {
                 //Read register[ubyte] and address[int24]
@@ -691,7 +702,6 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
                 write(format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             }
             //int24 have to be read as 3 ubytes
-            //writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
             write("\n");
             return;
         case BMSFunction.RETURN_NOARG: //0xC5
@@ -708,12 +718,27 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
             return;
         case BMSFunction.JMP: //0xC8
             //Read condition?[ubyte] and address[int24]
+            //Like C4, we also have to check for C0 in the first argument
             ubyte[] data;
-            data.length = 4;
+            data.length = 1;
             auto reader = binaryReader(data);
             bmsFile.rawRead(data);
-            //int24 have to be read as 3 ubytes
-            writeln("BMS Instruction: ", format!"%02X "(opcode), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            const ubyte arg = reader.read!ubyte;
+            writef("BMS Instruction: %s %s", format!"%02X"(opcode), format!"%02X"(arg));
+            if (arg == 0xC0) {
+                data = [];
+                data.length = 4;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                //int24 have to be read as 3 ubytes
+                writeln(format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            } else {
+                data = [];
+                data.length = 3;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                writeln(format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            }
             return;
         case BMSFunction.LOOP_S: //0xC9
             //Read something?[short]
@@ -1026,7 +1051,7 @@ void printBMSInstruction (ubyte opcode, File bmsFile) {
 }
 
 ///Takes an opcode and decompiles it, writing the instruction to an output file
-void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS) {
+void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS, BMSLabel[] *decompiledLabels) {
     if (opcode == 0x00) {
         //First check if we are near end of file
         if ((bmsFile.size - bmsFile.tell()) < 32) {
@@ -1386,8 +1411,11 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS) {
             data.length = 4;
             auto reader = binaryReader(data, ByteOrder.BigEndian);
             bmsFile.rawRead(data);
+            const ubyte trackid = reader.read!(ubyte);
             //int24 has to be read as a ubyte bitshifted left by 16 and OR'd with a ushort
-            decompiledBMS.writeln("opentrack ", format!"%sb "(reader.read!(ubyte)), format!"%sq "((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+            *decompiledLabels ~= BMSLabel(("TRACK_" ~ format!"%s"(trackid) ~ "_START:"), address);
+            decompiledBMS.writeln("opentrack ", format!"%sb "(trackid), "@TRACK_" ~ format!"%s"(trackid) ~ "_START");
             return;
         case BMSFunction.CALL: //0xC4
             //Read condition?[ubyte] and address[int24] and something?[ubyte]
@@ -1404,14 +1432,19 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS) {
                 data.length = 4;
                 reader.source(data);
                 bmsFile.rawRead(data);
-                decompiledBMS.write(format!"%sb "(reader.read!(ubyte)), format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+                const ubyte register = reader.read!ubyte;
+                const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+                *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(decompiledLabels.length) ~ ":"), address);
+                decompiledBMS.write(format!"%sb "(register), "@CALL_" ~ format!"%s"(decompiledLabels.length));
             } else {
                 //read address[int24]
                 data = [];
                 data.length = 3;
                 reader.source(data);
                 bmsFile.rawRead(data);
-                decompiledBMS.write(format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+                const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+                *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(decompiledLabels.length) ~ ":"), address);
+                decompiledBMS.write("@CALL_" ~ format!"%s"(decompiledLabels.length));
             }
             decompiledBMS.write("\n");
             return;
@@ -1429,12 +1462,33 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS) {
             return;
         case BMSFunction.JMP: //0xC8
             //Read condition?[ubyte] and address[int24]
+            //Like 0xC4, we have to check for C0 as the first argument
             ubyte[] data;
-            data.length = 4;
+            data.length = 1;
             auto reader = binaryReader(data, ByteOrder.BigEndian);
             bmsFile.rawRead(data);
-            //int24 have to be read as 3 ubytes
-            decompiledBMS.writeln("jmp ", format!"%sb "(reader.read!(ubyte)), format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            const ubyte arg = reader.read!(ubyte);
+            decompiledBMS.write("jmp ", format!"%sb "(arg));
+            if (arg == 0xC0) {
+                //Read something[ubyte] and address[int24]
+                data = [];
+                data.length = 4;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                const ubyte condition = reader.read!ubyte;
+                const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+                *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+                decompiledBMS.writeln(format!"%sb "(condition), "@JMP_" ~ format!"%s"(address) ~ "h");
+            } else {
+                //Read address[int24]
+                data = [];
+                data.length = 3;
+                reader.source(data);
+                bmsFile.rawRead(data);
+                const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+                *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+                decompiledBMS.writeln("@JMP_" ~ format!"%s"(address) ~ "h");
+            }
             return;
         case BMSFunction.LOOP_S: //0xC9
             //Read something?[short]
@@ -1758,12 +1812,13 @@ void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
 }
 
 ///A function that handles jump tables in a BMS file and outputs it to a decompiled BMS file
-void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo) {
+void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo, ulong[ulong] addressLookUptable) {
     writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
     //Jumptables are incremental, when you find that the next value is lower
     //than the one you have, you reached the end of the current jumptable
     decompiledBMS.write("Jumptable: ");
     for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++) {
+        addressLookUptable[bmsFile.tell()] = decompiledBMS.tell();
         ubyte[] data;
         data.length = 1;
         auto reader = binaryReader(data);
@@ -1810,7 +1865,7 @@ void A53ByteArgOverride(File bmsFile, ubyte opcode) {
 }
 
 ///A command parser override for 0xA5 that reads 3 bytes of arguments instead of 2, outputting a decompiled form to a decompiled BMS file TODO: remove the need for this function
-void A53ByteArgOverrideFile(File bmsFile, File decompiledBMS, ubyte opcode) {
+void A53ByteArgOverrideFile(File bmsFile, File decompiledBMS) {
     writeln("0xA5 3 BYTE ARGUMENT OVERRIDE. PLEASE IMPLEMENT ACCURATE PARSING FOR 0xA5 IN THE FUTURE");
     //Read target register[ubyte] and value[ubyte] and something?[ubyte]
     ubyte[] data;
