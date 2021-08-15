@@ -78,7 +78,7 @@ int decompileBMS(string filename, string task) {
                 if (task == "print") {
                     HandleBMSJumpTable(bms, bmsInfo);
                 } else if (task == "decompile") {
-                    HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo, addressLookUptable);
+                    HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo, addressLookUptable, &decompiledLabels);
                 }
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
@@ -146,5 +146,44 @@ int decompileBMS(string filename, string task) {
 
 ///Recompiles a BMS file from our editable text format
 int recompileBMS(string filename) {
+    File bms = File(filename, "r");
+    File bmsOutput = File(filename ~ ".bms", "wb");
+    ulong[string] compiledLabels; //Ulong = address in bmsOutput, string = label name
+    uint outputPos;
+    //Assembling needs to be done in two passes, 
+    //first we need to mark all label positions
+    //for every other command we will simply count how many bytes that
+    //instruction would be at in the output
+    string linebuf;
+    string label;
+    foreach (line; bms.byLine) {
+        linebuf = cast(string)line;
+        writeln(linebuf);
+        if (canFind(linebuf, ":")) { //Check if the current line is a label
+            label = chop(linebuf);
+            compiledLabels[label.idup] = outputPos;
+            writefln("Label %s marked at %sh", chop(linebuf), outputPos);
+        } else {
+            writeln("Found instruction");
+            outputPos += findBMSInstByteLength(linebuf);
+            writefln("Current positon: %s", outputPos);
+        }
+    }
+    writeln(compiledLabels);
+    readln();
+    //Second Pass is where we actually assemble the file
+    bms.seek(0);
+    foreach (line; bms.byLine) {
+        linebuf = cast(string)line;
+        writeln(linebuf);
+        if (canFind(linebuf, ":")) //Now we skip parsing lable lines
+            continue;
+        compileBMSInstruction(bmsOutput, linebuf, compiledLabels);
+    }
+    ubyte[1] padding = [0];
+    while (bmsOutput.tell() % 32 != 0) {
+        bmsOutput.rawWrite(padding);
+    }
+    writeln("Finished Assembling!");
     return 0;
 }

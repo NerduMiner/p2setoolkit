@@ -1,11 +1,15 @@
 module bmsinterpret;
 import binary.reader;
+import binary.writer;
 import binary.common;
 import std.algorithm;
+import std.array;
+import std.conv;
 import std.exception;
 import std.file;
 import std.format;
 import std.stdio;
+import std.string;
 
 ///Needed to know what block of arbitrary data we are looking out for next
 int dataInfoPosition = 0;
@@ -1795,6 +1799,147 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS, BMS
     }
 }
 
+///A function that assists in the first part of the BMS assembly process by returning amount of bytes processed for a certain instruction
+uint findBMSInstByteLength(string line) {
+    string[] instruction = line.split(" ");
+    switch (instruction[0]) { //Includes opcode instruction
+        case "opentrack":
+            return 5;
+        case "timebase":
+            return 3;
+        case "param_set_8":
+            return 3;
+        case "wait16":
+            return 3;
+        case "tempo":
+            return 3;
+        case "wait_EA":
+            return 4;
+        case "jmp":
+            return 5;
+        case "synccpu":
+            return 3;
+        case "perf_s8_nodur":
+            return 3;
+        case "noteon":
+            uint length = cast(uint)instruction.length - 2;
+            return length;
+        case "wait8":
+            return 2;
+        case "noteoff":
+            return 1;
+        default:
+            throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instruction[0] ~ " IN LENGTH PARSER");
+    }
+}
+
+///A function that takes a decompiled instruction and converts it to bytecode
+void compileBMSInstruction(File outputBMS, string instruction, ulong[string] labels) {
+    string[] instructionargs = instruction.split(" ");
+    BinaryWriter writer = BinaryWriter(ByteOrder.BigEndian);
+    switch (instructionargs[0]) { //Includes opcode instruction
+        case "opentrack":
+            writer.write(BMSFunction.OPENTRACK); //Opcode
+            writer.write(to!byte(strip(instructionargs[1], "b"))); //Track id
+            writeInt24(&writer, to!int(labels[strip(instructionargs[2], "@")])); //Address
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "timebase":
+            writer.write(BMSFunction.TIMEBASE); //Opcode
+            writer.write(to!short(strip(instructionargs[1], "h"))); //Value
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "param_set_8":
+            writer.write(BMSFunction.PARAM_SET_8); //Opcode
+            writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Register
+            writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Value
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "wait16":
+            writer.write(BMSFunction.CMD_WAIT16); //Opcode
+            writer.write(to!short(strip(instructionargs[1], "h"))); //Wait period
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "tempo":
+            writer.write(BMSFunction.TEMPO); //Opcode
+            writer.write(to!short(strip(instructionargs[1], "h"))); //Tempo
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "wait_EA":
+            writer.write(BMSFunction.WAIT_VLQ); //Opcode
+            writeInt24(&writer, to!int(strip(instructionargs[1], "q")));
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "jmp":
+            writer.write(BMSFunction.JMP); //Opcode
+            const ubyte condition = to!byte(strip(instructionargs[1], "b"));
+            writer.write(condition); //Condition
+            if (condition == 0xC0) {
+                writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Somethingidk
+                writeInt24(&writer, to!int(labels[strip(instructionargs[3], "@")])); //Address
+            }
+            writeInt24(&writer, to!int(labels[strip(instructionargs[2], "@")])); //Address
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "synccpu":
+            writer.write(BMSFunction.SYNCCPU); //Opcode
+            writer.write(to!short(strip(instructionargs[1], "h"))); //Maximum wait
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "perf_s8_nodur":
+            writer.write(BMSFunction.PERF_S8_NODUR); //Opcode
+            writer.write(to!ubyte(strip(instructionargs[1], "b"))); //param
+            writer.write(to!ubyte(strip(instructionargs[2], "b"))); //value
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "noteon":
+            writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Opcode
+            for (int i = 2; i < instructionargs.length - 1; i++) {
+                writer.write(to!ubyte(strip(instructionargs[i], "b")));
+            }
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "wait8":
+            writer.write(BMSFunction.CMD_WAIT8); //Opcode
+            writer.write(to!ubyte(strip(instructionargs[1], "b"))); //wait time
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        case "noteoff":
+            const ubyte voicestop = (to!ubyte(strip(instructionargs[1], "b")) | 0x80);
+            writer.write(voicestop);
+            if ((voicestop & 0x8) > 0) {
+                writer.write(to!ubyte(strip(instructionargs[2], "b")));
+            }
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        default:
+            throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instructionargs[0] ~ " IN COMPILER");
+    }
+}
+
+///A function that writes an int24 to a binarywriter's buffer, function ported from Flaaffy https://github.com/arookas/flaaffy/blob/5925f5db92394e12368d67c32785f57c9ceaf095/mareep/binary.cs#L35
+void writeInt24(BinaryWriter *writer, int value) {
+    byte byte1 = cast(byte)((value >> 16) & 0xFF);
+    byte byte2 = cast(byte)((value >> 8) & 0xFF);
+    byte byte3 = cast(byte)(value & 0xFF);
+
+    writer.write(byte1);
+    writer.write(byte2);
+    writer.write(byte3);
+}
+
 ///A function that handles jump tables in a BMS file
 void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
     writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
@@ -1812,18 +1957,26 @@ void HandleBMSJumpTable(File bmsFile, BMSDataInfo[] bmsinfo) {
 }
 
 ///A function that handles jump tables in a BMS file and outputs it to a decompiled BMS file
-void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo, ulong[ulong] addressLookUptable) {
+void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo, ulong[ulong] addressLookUptable, BMSLabel[] *decompiledLabels) {
     writeln("BMS JUMPTABLE DETECTED: OUTPUTTING JUMPTABLE");
     //Jumptables are incremental, when you find that the next value is lower
     //than the one you have, you reached the end of the current jumptable
-    decompiledBMS.write("Jumptable: ");
-    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++) {
+    //decompiledBMS.write("Jumptable: ");
+    while (decompiledBMS.tell() % 1 != 0) { //pad to NOTHING THERE ARE NO RULES TODO MANUALLY DEFINE PADDING LENGTH IN INFO FILE
+        //writeln("Padding file");
+        ubyte[1] data;
+        bmsFile.rawRead(data);
+    }
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength / 3; i++) {
         addressLookUptable[bmsFile.tell()] = decompiledBMS.tell();
         ubyte[] data;
-        data.length = 1;
-        auto reader = binaryReader(data);
+        data.length = 3; //1
+        auto reader = binaryReader(data, ByteOrder.BigEndian);
         bmsFile.rawRead(data);
-        decompiledBMS.write(format!"%02X "(reader.read!(ubyte)));
+        const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+        *decompiledLabels ~= BMSLabel(("JUMPTABLE_" ~ format!"%s"(address) ~ "h:"), address);
+        decompiledBMS.writeln("@JUMPTABLE_" ~ format!"%s"(address) ~ "h");
+        //decompiledBMS.write(format!"%02X "(reader.read!(ubyte)));
     }
     decompiledBMS.write("\n");
 }
