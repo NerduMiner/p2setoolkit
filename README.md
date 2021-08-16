@@ -11,6 +11,7 @@ Run the executable in CLI/Terminal. The desired bms file you wish to handle with
 <br/>`p2setoolkit --input [name of bms file] --task [print/decompile]`
 <br/>"print" makes the tool print out every BMS Instruction in the file, useful for debugging purposes.
 <br/>"decompile" decompiles the byte code into a dissassembled text format, similar to flaafy's cotton format besides a few verbosities.
+<br/>The task argument is not needed if you are reassembling a decompiled BMS file.
 
 # .info file
 YOU WILL NEED TO CREATE A [filename.bms].info FILE FOR THE PROGRAM TO RUN IN DECOMPILE MODE. This is due to the fact that there can be arbitrary data in a file that is hard for the tool to detect, or 0xA5 and 0xA8 instructions that only take 3 bytes of arguments instead of 4(for reasons yet unknown as of 8/11/2021).
