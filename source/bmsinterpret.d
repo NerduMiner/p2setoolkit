@@ -679,7 +679,33 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
         }
         return;
     case BMSFunction.PARAM_LOADTBL: //0xAA
-        throw new Exception("0xAA CAUGHT BUT NOT HANDLED IN INSTRUCTION CREATOR");
+        //Read flag[ubyte] first, then destination register?[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        const ubyte flags = reader.read!ubyte;
+        writef("BMS Instruction: %02X %02X %02X ", opcode, flags, reader.read!ubyte);
+        if ((flags & 0xF) == 0x4 && (flags & 0xF) == 0x8) //Read short
+        {
+            data = [2];
+            reader.source(data);
+            bmsFile.rawRead(data);
+            writef("%02X %02X ", reader.read!ubyte, reader.read!ubyte);
+        }
+        else if ((flags & 0xF) == 0x4 || (flags & 0xF) == 0x8 || (flags & 0xF) == 0) //Read ubyte
+        {
+            data = [1];
+            reader.source(data);
+            bmsFile.rawRead(data);
+            writef("%02X ", reader.read!ubyte);
+        }
+        //Read something?[ubyte]
+        data = [1];
+        reader.source(data);
+        bmsFile.rawRead(data);
+        writefln("%02X", reader.read!ubyte);
+        return;
     case BMSFunction.PARAM_SUBTRACT: //0xAB
         //Read target register[ubyte] and value[ubyte]
         ubyte[] data;
@@ -737,23 +763,13 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
                 format!"%02X"(reader.read!(ubyte)));
         return;
     case BMSFunction.OPOVERRIDE_2: //0xB1?
-        throw new Exception(
-                "CONFIRM BEHAVIOR OF THIS 0xBX OPCODE FIRST: " ~ format!"%02X"(opcode));
-        /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
-            writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
-            //Read opcode
-            ubyte[] data;
-            data.length = 1;
-            auto reader = binaryReader(data);
-            bmsFile.rawRead(data);
-            printBMSInstruction(reader.read!(ubyte), bmsFile);
-            //Read arguments[ubyte x2]
-            data = [];
-            data.length = 2;
-            bmsFile.rawRead(data);
-            reader.source(data);
-            writeln("0xB0 Arguments: ", format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
-            return;*/
+        //Read overridden opcode[ubyte], argument mask[ubyte], then 0xB1 argument[ubyte], then another ubyte that could go to either arg mask or 0xB1 arg idk
+        ubyte[] data;
+        data.length = 4;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        writefln("BMS Instruction[Funny 0xB1]: %02X %02X %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.OPENTRACK: //0xC1
         //Read track id[ubyte] and address[int24]
         ubyte[] data;
@@ -819,7 +835,7 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
         auto reader = binaryReader(data);
         bmsFile.rawRead(data);
         const ubyte arg = reader.read!ubyte;
-        writef("BMS Instruction: %s %s", format!"%02X"(opcode), format!"%02X"(arg));
+        writef("BMS Instruction: %02X %02X ", opcode, arg);
         if (arg == 0xC0)
         {
             data = [];
@@ -1528,7 +1544,33 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         }
         return;
     case BMSFunction.PARAM_LOADTBL: //0xAA
-        throw new Exception("0xAA CAUGHT BUT NOT HANDLED IN INSTRUCTION DECOMPILER");
+        //Read flag[ubyte], then destination register?[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        const ubyte flags = reader.read!ubyte;
+        decompiledBMS.writef("param_loadtbl %sb %sb ", flags, reader.read!ubyte);
+        if ((flags & 0xF) == 0x4 && (flags & 0xF) == 0x8) //Read short
+        {
+            data = [2];
+            reader.source(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writef("%sh ", reader.read!ushort);
+        }
+        else if ((flags & 0xF) == 0x4 || (flags & 0xF) == 0x8 || (flags & 0xF) == 0) //Read ubyte
+        {
+            data = [1];
+            reader.source(data);
+            bmsFile.rawRead(data);
+            decompiledBMS.writef("%sb ", reader.read!ubyte);
+        }
+        //Read something?[ubyte]
+        data = [1];
+        reader.source(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("%sb", reader.read!ubyte);
+        return;
     case BMSFunction.PARAM_SUBTRACT: //0xAB
         //Read target register[ubyte] and value[ubyte]
         ubyte[] data;
@@ -1581,23 +1623,12 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
                 format!"%sb "(reader.read!(ubyte)), format!"%sb"(reader.read!(ubyte)));
         return;
     case BMSFunction.OPOVERRIDE_2: //0xB1?
-        throw new Exception(
-                "CONFIRM BEHAVIOR OF THIS 0xBX OPCODE FIRST: " ~ format!"%02X"(opcode));
-        /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
-            writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
-            //Read opcode
-            ubyte[] data;
-            data.length = 1;
-            auto reader = binaryReader(data);
-            bmsFile.rawRead(data);
-            printBMSInstruction(reader.read!(ubyte), bmsFile);
-            //Read arguments[ubyte x2]
-            data = [];
-            data.length = 2;
-            bmsFile.rawRead(data);
-            reader.source(data);
-            writeln("0xB0 Arguments: ", format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
-            return;*/
+        ubyte[] data;
+        data.length = 4;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("op_override_2 %02X %sb %sb %sb", reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.OPENTRACK: //0xC1
         //Read track id[ubyte] and address[int24]
         ubyte[] data;
@@ -2051,7 +2082,6 @@ uint findBMSInstByteLength(string line)
         return 3;
     case "noteon":
         uint length = cast(uint) instruction.length - 2;
-        writefln("Noteon argument no.: %s",length);
         return length;
     case "wait8":
         return 2;
@@ -2174,6 +2204,21 @@ uint findBMSInstByteLength(string line)
         return 3;
     case "printf":
         return to!uint(line.length - 7) + 1;
+    case "param_set_r":
+        return 3;
+    case "param_loadtbl":
+        const ubyte flag = to!ubyte(strip(instruction[1], "b"));
+        if ((flag & 0xF) == 0x4 && (flag & 0xF) == 0x8)
+        {
+            return 6;
+        }
+        else if ((flag & 0xF) == 0x4 || (flag & 0xF) == 0x8 || (flag & 0xF) == 0) //Read ubyte
+        {
+            return 5;
+        }
+        return 5;
+    case "op_override_2":
+        return 5;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instruction[0] ~ " IN LENGTH PARSER");
     }
@@ -2651,7 +2696,52 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         return;
     case "printf":
         writer.write(BMSFunction.PRINTF); //Opcode
-        writer.write(instruction[6 .. $]); //Text
+        version(Windows)
+        {
+            //writeln(instruction[7 .. $]);
+            //readln();
+            //writer.write(instruction[7 .. $]); //Text
+            outputBMS.rawWrite(writer.buffer);
+            outputBMS.rawWrite(cast(char[])(instruction[7 .. $])); //Text
+            writer.clear();
+        }
+        else
+        {
+            writer.write(instruction[6 .. $]); //Text
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+        }
+        return;
+    case "param_set_r":
+        writer.write(BMSFunction.PARAM_SET_R); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Source Register
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Destination Register
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "param_loadtbl":
+        writer.write(BMSFunction.PARAM_LOADTBL); //Opcode
+        const ubyte flag = to!ubyte(strip(instructionargs[1], "b"));
+        writer.write(flag);
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Destination Register
+        if ((flag & 0xF) == 0x4 && (flag & 0xF) == 0x8)
+        {
+            writer.write(to!ushort(strip(instructionargs[3], "h"))); //Something
+        }
+        else if ((flag & 0xF) == 0x4 || (flag & 0xF) == 0x8 || (flag & 0xF) == 0) //Read ubyte
+        {
+            writer.write(to!ubyte(strip(instructionargs[3], "b"))); //Something
+        }
+        writer.write(to!ubyte(strip(instructionargs[4], "b"))); //Something
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "op_override_2":
+        writer.write(BMSFunction.OPOVERRIDE_2); //Opcode
+        writer.write(to!ubyte(instructionargs[1], 16)); //Overridden opcode
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Argument Mask
+        writer.write(to!ubyte(strip(instructionargs[3], "b"))); //Argument for first opcode
+        writer.write(to!ubyte(strip(instructionargs[4], "b"))); //Could be for either thing
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;
@@ -2699,7 +2789,7 @@ void HandleBMSJumpTableFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsi
     //than the one you have, you reached the end of the current jumptable
     //decompiledBMS.write("Jumptable: ");
     if (bmsinfo[dataInfoPosition].padlength > 0)
-        decompiledBMS.writef(".pad %s", bmsinfo[dataInfoPosition].padlength);
+        decompiledBMS.writef(".pad %s\n", bmsinfo[dataInfoPosition].padlength);
     for (int i = 0; i < bmsinfo[dataInfoPosition].padlength; i++)
     {
         //writeln("Padding file");

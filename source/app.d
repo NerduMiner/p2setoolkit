@@ -67,14 +67,15 @@ int decompileBMS(string filename, string task) {
             readln();
             writeln("At ", format!"%X"(bms.tell), " in file.");
         }*/
-        //writeln("At ", format!"%X"(bms.tell), " in file.");
+        //writeln("At ", format!"%s"(bms.tell), " in file.");
+        //readln();
         //We need to check if we're at a spot in the file where a label should be dropped
         //FIRST check if we are at a label position as long as we actually have some
         addressLookUptable[bms.tell()] = decompiledBMS.tell();
         //We need to make sure that we aren't reading arbitrary data first, so do a check before parsing an instruction
         if (bms.tell() == bmsInfo[dataInfoPosition].position) {
-            writeln("Detected special data block at ", bms.tell(), ".");
-            writeln("Data Type: ", bmsInfo[dataInfoPosition].dataType);
+            //writeln("Detected special data block at ", bms.tell(), ".");
+            //writeln("Data Type: ", bmsInfo[dataInfoPosition].dataType);
             if (bmsInfo[dataInfoPosition].dataType == "data") {
                 HandleBMSArbitraryData(bms, bmsInfo);
             }
@@ -131,9 +132,9 @@ int decompileBMS(string filename, string task) {
     decompiledLabels.sort();
     writefln("Adding %s labels...THIS MAY TAKE TIME", decompiledLabels.length);
     foreach(label; decompiledLabels) {
-        writeln(label.position);
+        //writeln(label.position);
         if (bms.tell() > label.position) {
-            writefln("Appending label %s at %s", label.labelname, addressLookUptable[label.position]);
+            //writefln("Appending label %s at %s", label.labelname, addressLookUptable[label.position]);
             decompiledBMS.seek(addressLookUptable[label.position]);
             string buffer;
             foreach(line; decompiledBMS.byLine) {
@@ -153,6 +154,7 @@ int recompileBMS(string filename) {
     File bms = File(filename, "r");
     File bmsOutput = File(filename ~ ".bms", "wb");
     File bmsAddresses = File(filename ~ "_addressinfo.txt", "w");
+    writeln("Doing first pass of assembling...");
     ulong[string] compiledLabels; //Ulong = address in bmsOutput, string = label name
     uint outputPos;
     //Assembling needs to be done in two passes, 
@@ -163,40 +165,42 @@ int recompileBMS(string filename) {
     string label;
     foreach (line; bms.byLine) {
         linebuf = cast(string)line;
-        writeln(linebuf);
+        //writeln(linebuf);
         //if (outputPos > 2750)
         //    readln();
         if (canFind(linebuf, ":")) { //Check if the current line is a label
             label = chop(linebuf);
             compiledLabels[label.idup] = outputPos;
-            writefln("Label %s marked at %sh", chop(linebuf), outputPos);
+            //writefln("Label %s marked at %sh", chop(linebuf), outputPos);
         } else if (canFind(linebuf, "@JUMPTABLE")) { //Check if the current line is a jumptable address
-            writeln("Found jumptable address");
+            //writeln("Found jumptable address");
             outputPos += 3; //Each address is 3 bytes long
-            writefln("Current positon: %s", outputPos);
+            //writefln("Current positon: %s", outputPos);
         } else if (canFind(linebuf, ".pad")) { //Check if we found a manual pad
             string[] pad = split(linebuf, " ");
             const uint padAmount = to!uint(pad[1]);
-            writefln("Writing %s amount of padding", padAmount);
+            ubyte[1] padding = [0];
+            //writefln("Found %s padding bytes", padAmount);
             for (int i = 0; i < padAmount; i++) {
-                
+                outputPos += 1;
             }
         } else {
-            writeln("Found instruction");
+            //writeln("Found instruction");
             outputPos += findBMSInstByteLength(linebuf);
-            writefln("Current positon: %s", outputPos);
+            //writefln("Current positon: %s", outputPos);
         }
     }
     foreach (labelpair; compiledLabels.byKeyValue())
     {
         bmsAddresses.writefln("%s : %s", labelpair.key, labelpair.value);
     }
-    readln();
+    writeln("Done! Doing second pass of assembling...");
+    //readln();
     //Second Pass is where we actually assemble the file
     bms.seek(0);
     foreach (line; bms.byLine) {
         linebuf = cast(string)line;
-        writeln(linebuf);
+        //writeln(linebuf);
         if (canFind(linebuf, ":")) //Now we skip parsing lable lines
             continue;
         if (canFind(linebuf, "@JUMPTABLE")) //But we have to convert our jumptables back
@@ -207,7 +211,19 @@ int recompileBMS(string filename) {
             writer.clear();
             continue;
         }
-        compileBMSInstruction(bmsOutput, linebuf, compiledLabels);
+        if (canFind(linebuf, ".pad")) 
+        {
+            string[] pad = split(linebuf, " ");
+            const uint padAmount = to!uint(pad[1]);
+            ubyte[1] padding = [0];
+            //writefln("Writing %s padding bytes", padAmount);
+            for (int i = 0; i < padAmount; i++) {
+                bmsOutput.rawWrite(padding);
+            }
+        } else 
+        {
+            compileBMSInstruction(bmsOutput, linebuf, compiledLabels);
+        }
     }
     ubyte[1] padding = [0];
     while (bmsOutput.tell() % 32 != 0) {
