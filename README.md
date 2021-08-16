@@ -7,9 +7,9 @@ The tool, with overrides for some 0xA5 and 0xA8 instructions, can parse the enti
 p2setoolkit requires a D compiler(DMD is recommended), downloads can be found at https://dlang.org/.<br/>Once installed, run `dub build` in your CLI/Terminal in the root directory of the repository to compile the project.
 
 # Usage
-Run the executable in CLI/Terminal. The desired bms file you wish to handle with the tool and what task you would like to do needs to be put in the arguments like so:
-<br/>`p2setoolkit --input [name of bms file] --task [print/decompile]`
-<br/>"print" makes the tool print out every BMS Instruction in the file, useful for debugging purposes.
+Run the executable in CLI/Terminal. The desired bms/dissassembled bms file you wish to handle with the tool and what task you would like to do needs to be put in the arguments like so:
+<br/>`p2setoolkit --input [filename.bms/filename.bms.txt] --task [print/decompile]`
+<br/>"print" makes the tool print out every BMS Instruction in the file, useful for debugging purposes and making sure the tool can successfully decompile the file.
 <br/>"decompile" decompiles the byte code into a dissassembled text format, similar to flaafy's cotton format besides a few verbosities.
 <br/>The task argument is not needed if you are reassembling a decompiled BMS file.
 
