@@ -179,7 +179,6 @@ int recompileBMS(string filename) {
         } else if (canFind(linebuf, ".pad")) { //Check if we found a manual pad
             string[] pad = split(linebuf, " ");
             const uint padAmount = to!uint(pad[1]);
-            ubyte[1] padding = [0];
             //writefln("Found %s padding bytes", padAmount);
             for (int i = 0; i < padAmount; i++) {
                 outputPos += 1;

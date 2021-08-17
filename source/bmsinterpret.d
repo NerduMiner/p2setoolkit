@@ -1660,10 +1660,12 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
             bmsFile.rawRead(data);
             const ubyte register = reader.read!ubyte;
             const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
-            *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(decompiledLabels.length) ~ "_" ~ format!"%s"(address) ~ "h:"),
-                    address);
-            decompiledBMS.write(format!"%sb "(register),
-                    "@CALL_" ~ format!"%s"(decompiledLabels.length - 1) ~ "_" ~ format!"%s"(address) ~ "h");
+            if (!canFind(*decompiledLabels, BMSLabel(("CALL_" ~ format!"%s"(address) ~ "h:"), address)))
+            {
+                writefln("Label %s doesn't exist yet!", "CALL_" ~ format!"%s"(address) ~ "h:");
+                *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(address) ~ "h:"), address);
+            }
+            decompiledBMS.write(format!"%sb "(register), "@CALL_" ~ format!"%s"(address) ~ "h");
         }
         else
         {
@@ -1673,9 +1675,13 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
             reader.source(data);
             bmsFile.rawRead(data);
             const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
-            *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(decompiledLabels.length) ~ "_" ~ format!"%s"(address) ~ "h:"),
-                    address);
-            decompiledBMS.write("@CALL_" ~ format!"%s"(decompiledLabels.length - 1) ~ "_" ~ format!"%s"(address) ~ "h");
+            if (!canFind(*decompiledLabels, BMSLabel(("CALL_" ~ format!"%s"(address) ~ "h:"), address)))
+            {
+                writefln("Label %s doesn't exist yet!", "CALL_" ~ format!"%s"(address) ~ "h:");
+                *decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(address) ~ "h:"), address);
+            }
+            //*decompiledLabels ~= BMSLabel(("CALL_" ~ format!"%s"(address) ~ "h:"), address);
+            decompiledBMS.write("@CALL_" ~ format!"%s"(address) ~ "h");
         }
         decompiledBMS.write("\n");
         return;
@@ -1709,7 +1715,10 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
             bmsFile.rawRead(data);
             const ubyte condition = reader.read!ubyte;
             const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
-            *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+            if(!canFind(*decompiledLabels, BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address)))
+            {
+                *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+            }
             decompiledBMS.writeln(format!"%sb "(condition), "@JMP_" ~ format!"%s"(address) ~ "h");
         }
         else
@@ -1720,7 +1729,10 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
             reader.source(data);
             bmsFile.rawRead(data);
             const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
-            *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+            if(!canFind(*decompiledLabels, BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address)))
+            {
+                *decompiledLabels ~= BMSLabel(("JMP_" ~ format!"%s"(address) ~ "h:"), address);
+            }
             decompiledBMS.writeln("@JMP_" ~ format!"%s"(address) ~ "h");
         }
         return;
@@ -2696,21 +2708,9 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         return;
     case "printf":
         writer.write(BMSFunction.PRINTF); //Opcode
-        version(Windows)
-        {
-            //writeln(instruction[7 .. $]);
-            //readln();
-            //writer.write(instruction[7 .. $]); //Text
-            outputBMS.rawWrite(writer.buffer);
-            outputBMS.rawWrite(cast(char[])(instruction[7 .. $])); //Text
-            writer.clear();
-        }
-        else
-        {
-            writer.write(instruction[6 .. $]); //Text
-            outputBMS.rawWrite(writer.buffer);
-            writer.clear();
-        }
+        outputBMS.rawWrite(writer.buffer);
+        outputBMS.rawWrite(cast(char[])(instruction[7 .. $])); //Text
+        writer.clear();
         return;
     case "param_set_r":
         writer.write(BMSFunction.PARAM_SET_R); //Opcode
