@@ -21,26 +21,27 @@ int main(string[] args)
         writeln("No arguments given. Please provide BMS/Decomp TXT.");
         return 1;
     }
-    string filename = "se.bms";
-    string task = "decompile";
+    string filename;
+    string task = "bofadeez";
+    string mode = "jv1pikmin2";
     int workSuccess;
-    auto const argInfo = getopt(args, "input", &filename, "task", &task);
+    auto const argInfo = getopt(args, "input", &filename, "task", &task, "mode", &mode);
     if (extension(filename) == ".bms") {
         if (task != "print" && task != "decompile")
-            throw new Exception("Task argument must either be 'print' or 'decompile'");
+            throw new Exception("--task argument must either be 'print' or 'decompile', did you add --task to your arguments?");
         writeln("Decompiling BMS...");
-        workSuccess = decompileBMS(filename, task);
+        workSuccess = decompileBMS(filename, task, mode);
         return workSuccess;
     } else if (extension(filename) == ".txt") {
         writeln("Recompiling BMS...");
-        workSuccess = recompileBMS(filename);
+        workSuccess = recompileBMS(filename, mode);
         return workSuccess;
     }
     return 1;
 }
 
 ///Decompiles a BMS file, either creating an editable text based format or printing out instructions in the process
-int decompileBMS(string filename, string task) {
+int decompileBMS(string filename, string task, string mode) {
     File bms = File(filename, "rb");
     File bmsinfo = File(filename ~ ".info", "r");
     File decompiledBMS = File(filename ~ ".txt", "w");
@@ -77,13 +78,24 @@ int decompileBMS(string filename, string task) {
             //writeln("Detected special data block at ", bms.tell(), ".");
             //writeln("Data Type: ", bmsInfo[dataInfoPosition].dataType);
             if (bmsInfo[dataInfoPosition].dataType == "data") {
-                HandleBMSArbitraryData(bms, bmsInfo);
+                if (task == "print") {
+                    HandleBMSArbitraryData(bms, bmsInfo);
+                } else if (task == "decompile") {
+                    HandleBMSArbitraryDataFile(bms, decompiledBMS, bmsInfo);
+                }
             }
             if (bmsInfo[dataInfoPosition].dataType == "jumptable") {
                 if (task == "print") {
                     HandleBMSJumpTable(bms, bmsInfo);
                 } else if (task == "decompile") {
                     HandleBMSJumpTableFile(bms, decompiledBMS, bmsInfo, addressLookUptable, &decompiledLabels);
+                }
+            }
+            if (bmsInfo[dataInfoPosition].dataType == "envelope") {
+                if (task == "print") {
+                    HandleBMSEnvelope(bms, bmsInfo);
+                } else if (task == "decompile") {
+                    HandleBMSEnvelopeFile(bms, decompiledBMS, bmsInfo);
                 }
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
@@ -120,9 +132,9 @@ int decompileBMS(string filename, string task) {
         const ubyte opcode = reader.read!ubyte();
         const ubyte bmsInstruction = parseOpcode(opcode);
         if (task == "print") {
-            printBMSInstruction(bmsInstruction, bms);
+            printBMSInstruction(bmsInstruction, bms, mode);
         } else if (task == "decompile") {
-            decompileBMSInstruction(bmsInstruction, bms, decompiledBMS, &decompiledLabels);
+            decompileBMSInstruction(bmsInstruction, bms, decompiledBMS, &decompiledLabels, mode);
         }
         data = [];
         data.length = 1;
@@ -150,10 +162,9 @@ int decompileBMS(string filename, string task) {
 }
 
 ///Recompiles a BMS file from our editable text format
-int recompileBMS(string filename) {
+int recompileBMS(string filename, string mode) {
     File bms = File(filename, "r");
     File bmsOutput = File(filename ~ ".bms", "wb");
-    File bmsAddresses = File(filename ~ "_addressinfo.txt", "w");
     writeln("Doing first pass of assembling...");
     ulong[string] compiledLabels; //Ulong = address in bmsOutput, string = label name
     uint outputPos;
@@ -166,12 +177,12 @@ int recompileBMS(string filename) {
     foreach (line; bms.byLine) {
         linebuf = cast(string)line;
         //writeln(linebuf);
-        //if (outputPos > 2750)
-        //    readln();
         if (canFind(linebuf, ":")) { //Check if the current line is a label
             label = chop(linebuf);
             compiledLabels[label.idup] = outputPos;
-            //writefln("Label %s marked at %sh", chop(linebuf), outputPos);
+            writefln("Label %s marked at %sh", chop(linebuf), outputPos);
+            //if (outputPos > 1860)
+            //    readln();
         } else if (canFind(linebuf, "@JUMPTABLE")) { //Check if the current line is a jumptable address
             //writeln("Found jumptable address");
             outputPos += 3; //Each address is 3 bytes long
@@ -183,18 +194,19 @@ int recompileBMS(string filename) {
             for (int i = 0; i < padAmount; i++) {
                 outputPos += 1;
             }
+        } else if (canFind(linebuf, ".envelope")) {
+            const string[] envelope = split(linebuf, " ");
+            for (int i = 0; i < envelope.length - 2; i++) {
+                outputPos += 2;
+                //writefln("Current positon: %s", outputPos);
+            }
         } else {
             //writeln("Found instruction");
-            outputPos += findBMSInstByteLength(linebuf);
+            outputPos += findBMSInstByteLength(linebuf, mode);
             //writefln("Current positon: %s", outputPos);
         }
     }
-    foreach (labelpair; compiledLabels.byKeyValue())
-    {
-        bmsAddresses.writefln("%s : %s", labelpair.key, labelpair.value);
-    }
     writeln("Done! Doing second pass of assembling...");
-    //readln();
     //Second Pass is where we actually assemble the file
     bms.seek(0);
     foreach (line; bms.byLine) {
@@ -215,13 +227,27 @@ int recompileBMS(string filename) {
             string[] pad = split(linebuf, " ");
             const uint padAmount = to!uint(pad[1]);
             ubyte[1] padding = [0];
-            //writefln("Writing %s padding bytes", padAmount);
+            writefln("Writing %s padding bytes", padAmount);
             for (int i = 0; i < padAmount; i++) {
                 bmsOutput.rawWrite(padding);
             }
-        } else 
+            continue;
+        }
+        if (canFind(linebuf, ".envelope"))
         {
-            compileBMSInstruction(bmsOutput, linebuf, compiledLabels);
+            string[] args = split(linebuf, " ");
+            BinaryWriter writer = BinaryWriter(ByteOrder.LittleEndian);
+            for (int i = 1; i < args.length - 1; i++) {
+                writeln(args[i], " ", i);
+                writer.write(to!ushort(strip(args[i], "h")));
+            }
+            bmsOutput.rawWrite(writer.buffer);
+            writer.clear();
+            continue;
+        }
+        else 
+        {
+            compileBMSInstruction(bmsOutput, linebuf, compiledLabels, mode);
         }
     }
     ubyte[1] padding = [0];

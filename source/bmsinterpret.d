@@ -325,7 +325,7 @@ ubyte parseOpcode(ubyte opcode)
 }
 
 ///Takes a BMS opcode and prints out its full instruction in hex bytes
-void printBMSInstruction(ubyte opcode, File bmsFile)
+void printBMSInstruction(ubyte opcode, File bmsFile, string mode)
 {
     if (opcode == 0x00)
     {
@@ -596,6 +596,14 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
         writeln("BMS Instruction: ", format!"%02X "(opcode),
                 format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
         return;
+    case BMSFunction.PARAM_ADD_R: //0xA1
+        //Read source register[ubyte] and target register[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        writefln("BMS Instruction: %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.PARAM_CMP_R: //0xA3
         //Read target register[ubyte] and source register[ubyte]
         ubyte[] data;
@@ -622,6 +630,14 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
         bmsFile.rawRead(data);
         writeln("BMS Instruction: ", format!"%02X "(opcode),
                 format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+        return;
+    case BMSFunction.PARAM_MUL_8: //0xA6
+        //Read target register[ubyte] and value[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        writefln("BMS Instruction: %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte);
         return;
     case BMSFunction.PARAM_CMP_8: //0xA7
         //Read target register[ubyte] and value[ubyte]
@@ -977,14 +993,27 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
                 format!"%02X"(reader.read!(ubyte)));
         return;
     case BMSFunction.BUSCONNECT: //0xDD
-        //Read something[short]
-        ubyte[] data;
-        data.length = 2;
-        auto reader = binaryReader(data);
-        bmsFile.rawRead(data);
-        writeln("BMS Instruction: ", format!"%02X "(opcode),
-                format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
-        return;
+        if (mode == "jv1standard")
+        {
+            //Read something[3 bytes?]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writefln("BMS Instruction: %02X %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+            return;
+        }
+        else 
+        {
+            //Read something[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data);
+            bmsFile.rawRead(data);
+            writeln("BMS Instruction: ", format!"%02X "(opcode),
+                    format!"%02X "(reader.read!(ubyte)), format!"%02X"(reader.read!(ubyte)));
+            return;
+        }
     case BMSFunction.SETINTERRUPT: //0xDF
         //Read interrupt level[byte] and address[int24]
         ubyte[] data;
@@ -1208,7 +1237,7 @@ void printBMSInstruction(ubyte opcode, File bmsFile)
 
 ///Takes an opcode and decompiles it, writing the instruction to an output file
 void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
-        BMSLabel[]* decompiledLabels)
+        BMSLabel[]* decompiledLabels, string mode)
 {
     if (opcode == 0x00)
     {
@@ -1463,6 +1492,14 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         decompiledBMS.writeln("param_set_r ", format!"%sb "(reader.read!(ubyte)),
                 format!"%sb"(reader.read!(ubyte)));
         return;
+    case BMSFunction.PARAM_ADD_R: //0xA1
+        //Read source register[ubyte] and target register[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("param_add_r %sb %sb", reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.PARAM_CMP_R: //0xA3
         //Read target register[ubyte] and source register[ubyte]
         ubyte[] data;
@@ -1489,6 +1526,14 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         bmsFile.rawRead(data);
         decompiledBMS.writeln("param_add_8 ", format!"%sb "(reader.read!(ubyte)),
                 format!"%sb"(reader.read!(ubyte)));
+        return;
+    case BMSFunction.PARAM_MUL_8: //0xA6
+        //Read target register[ubyte] and value[ubyte]
+        ubyte[] data;
+        data.length = 2;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("param_mul_8 %sb %sb", reader.read!ubyte, reader.read!ubyte);
         return;
     case BMSFunction.PARAM_CMP_8: //0xA7
         //Read target register[ubyte] and value[ubyte]
@@ -1800,15 +1845,28 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         decompiledBMS.writeln("simpleosc ", format!"%sb"(reader.read!(ubyte)));
         return;
     case BMSFunction.SIMPLEENV: //0xD7
-        //Read Something?[int24] and something?[ubyte]
-        ubyte[] data;
-        data.length = 4;
-        auto reader = binaryReader(data, ByteOrder.BigEndian);
-        bmsFile.rawRead(data);
-        decompiledBMS.writeln("simpleenv ",
-                format!"%sq "((reader.read!(ubyte) << 16) | reader.read!(ushort)),
-                format!"%sb"(reader.read!(ubyte)));
-        return;
+        if (mode == "jv1standard")
+        {
+            //Read something?[ubyte] and address[int24]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writefln("simpleenv %sb %sq", reader.read!ubyte, ((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+            return;
+        }
+        else
+        {
+            //Read Something?[int24] and something?[ubyte]
+            ubyte[] data;
+            data.length = 4;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("simpleenv ",
+                    format!"%sq "((reader.read!(ubyte) << 16) | reader.read!(ushort)),
+                    format!"%sb"(reader.read!(ubyte)));
+            return;
+        }
     case BMSFunction.SIMPLEADSR: //0xD8
         //Read A[ubyte] D[ubyte] S[ubyte] and R[ubyte]: Xayrs version
         //Read 5 shorts: debugging Pikmin 2, Yoshi2's version
@@ -1848,13 +1906,26 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         decompiledBMS.writeln("outswitch ", format!"%sb"(reader.read!(ubyte)));
         return;
     case BMSFunction.BUSCONNECT: //0xDD
-        //Read something[short]
-        ubyte[] data;
-        data.length = 2;
-        auto reader = binaryReader(data, ByteOrder.BigEndian);
-        bmsFile.rawRead(data);
-        decompiledBMS.writeln("busconnect ", format!"%sh"(reader.read!(ushort)));
-        return;
+        if (mode == "jv1standard")
+        {
+            //Read something[int24]
+            ubyte[] data;
+            data.length = 3;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writefln("busconnect %sq", (reader.read!(ubyte) << 16) | reader.read!(ushort));
+            return;
+        }
+        else
+        {
+            //Read something[short]
+            ubyte[] data;
+            data.length = 2;
+            auto reader = binaryReader(data, ByteOrder.BigEndian);
+            bmsFile.rawRead(data);
+            decompiledBMS.writeln("busconnect ", format!"%sh"(reader.read!(ushort)));
+            return;
+        }
     case BMSFunction.SETINTERRUPT: //0xDF
         //Read interrupt level[byte] and address[int24]
         ubyte[] data;
@@ -2061,7 +2132,7 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
 }
 
 ///A function that assists in the first part of the BMS assembly process by returning amount of bytes processed for a certain instruction
-uint findBMSInstByteLength(string line)
+uint findBMSInstByteLength(string line, string mode)
 {
     string[] instruction = line.split(" ");
     switch (instruction[0])
@@ -2119,7 +2190,14 @@ uint findBMSInstByteLength(string line)
     case "panswset":
         return 4;
     case "busconnect":
-        return 3;
+        if (mode == "jv1standard")
+        {
+            return 4;
+        }
+        else
+        {
+            return 3;
+        }
     case "outswitch":
         return 2;
     case "oscroute":
@@ -2231,13 +2309,21 @@ uint findBMSInstByteLength(string line)
         return 5;
     case "op_override_2":
         return 5;
+    case "param_mul_8":
+        return 3;
+    case "param_add_r":
+        return 3;
+    case "param_cmp_r":
+        return 3;
+    case "param_subtract":
+        return 3;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instruction[0] ~ " IN LENGTH PARSER");
     }
 }
 
 ///A function that takes a decompiled instruction and converts it to bytecode
-void compileBMSInstruction(File outputBMS, string instruction, ulong[string] labels)
+void compileBMSInstruction(File outputBMS, string instruction, ulong[string] labels, string mode)
 {
     string[] instructionargs = instruction.split(" ");
     BinaryWriter writer = BinaryWriter(ByteOrder.BigEndian);
@@ -2380,11 +2466,22 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         writer.clear();
         return;
     case "busconnect":
-        writer.write(BMSFunction.BUSCONNECT); //Opcode
-        writer.write(to!short(strip(instructionargs[1], "h"))); //Something
-        outputBMS.rawWrite(writer.buffer);
-        writer.clear();
-        return;
+        if (mode == "jv1standard")
+        {
+            writer.write(BMSFunction.BUSCONNECT);
+            writeInt24(&writer, to!uint(strip(instructionargs[1], "q"))); //Something
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        }
+        else
+        {
+            writer.write(BMSFunction.BUSCONNECT); //Opcode
+            writer.write(to!short(strip(instructionargs[1], "h"))); //Something
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        }
     case "outswitch":
         writer.write(BMSFunction.OUTSWITCH); //Opcode
         writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Something
@@ -2556,12 +2653,24 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         writer.clear();
         return;
     case "simpleenv":
-        writer.write(BMSFunction.SIMPLEENV); //Opcode
-        writeInt24(&writer, to!uint(strip(instructionargs[1], "q"))); //Something
-        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Something
-        outputBMS.rawWrite(writer.buffer);
-        writer.clear();
-        return;
+        if (mode == "jv1standard")
+        {
+            writer.write(BMSFunction.SIMPLEENV); //Opcode
+            writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Something
+            writeInt24(&writer, to!uint(strip(instructionargs[2], "q"))); //Address
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;           
+        }
+        else
+        {
+            writer.write(BMSFunction.SIMPLEENV); //Opcode
+            writeInt24(&writer, to!uint(strip(instructionargs[1], "q"))); //Address
+            writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Something
+            outputBMS.rawWrite(writer.buffer);
+            writer.clear();
+            return;
+        }
     case "param_add_8":
         writer.write(BMSFunction.PARAM_ADD_8); //Opcode
         if ((instructionargs.length - 1) == 2)
@@ -2745,6 +2854,34 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;
+    case "param_mul_8":
+        writer.write(BMSFunction.PARAM_MUL_8); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Target Value
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Value
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "param_add_r":
+        writer.write(BMSFunction.PARAM_ADD_R); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Source Register
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Target Register
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "param_cmp_r":
+        writer.write(BMSFunction.PARAM_CMP_R); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Target Register
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Source Register
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "param_subtract":
+        writer.write(BMSFunction.PARAM_SUBTRACT); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Target Register
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Value
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instructionargs[0] ~ " IN COMPILER");
     }
@@ -2826,17 +2963,70 @@ void HandleBMSArbitraryData(File bmsFile, BMSDataInfo[] bmsinfo)
     }
     write("\n");
 }
-///A function that handles padding in a BMS file
-void HandleBMSPadding(File bmsFile, BMSDataInfo[] bmsinfo)
+
+///A function that handles uncategorized data in a BMS file that should still be written to the output file
+void HandleBMSArbitraryDataFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo) 
 {
-    writeln("BMS PADDING DTECTED: SKIPPING PADDING");
+    decompiledBMS.write(".data ");
     for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++)
     {
         ubyte[] data;
         data.length = 1;
         auto reader = binaryReader(data);
         bmsFile.rawRead(data);
+        decompiledBMS.write(format!"%02X "(reader.read!(ubyte)));
     }
+    decompiledBMS.write("\n");
+}
+
+///A function that handles padding in a BMS file
+void HandleBMSPadding(File bmsFile, BMSDataInfo[] bmsinfo)
+{
+    writeln("BMS PADDING DETECTED: SKIPPING PADDING");
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++)
+    {
+        ubyte[] data;
+        data.length = 1;
+        bmsFile.rawRead(data);
+    }
+}
+
+///A function that handles envelopes in a BMS file, code adapted from https://github.com/XAYRGA/libJAudio/blob/master/libJAudio/Loaders/JA_IBankLoader_V1.cs#L170
+void HandleBMSEnvelope(File bmsFile, BMSDataInfo[] bmsinfo)
+{
+    writeln("BMS ENVELOPE DETECTED: OUTPUTTING ENVELOPE");
+    write("Envelope: ");
+    while (true)
+    {
+        ubyte[] data;
+        data.length = 6;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        ushort mode = reader.read!ushort;
+        writef("%02X %02X %02X %02X %02X %02X ", (mode & 0xFF00), (mode & 0xFF), reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        if (mode > 0xB)
+            break;
+    }
+    write("\n");
+}
+
+///A function that handles envelopes in a BMS file, code adapted from https://github.com/XAYRGA/libJAudio/blob/master/libJAudio/Loaders/JA_IBankLoader_V1.cs#L170
+void HandleBMSEnvelopeFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo)
+{
+    writeln("BMS ENVELOPE DETECTED: OUTPUTTING ENVELOPE");
+    decompiledBMS.write(".envelope ");
+    while (true)
+    {
+        ubyte[] data;
+        data.length = 6;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        ushort mode = reader.read!ushort;
+        decompiledBMS.writef("%sh %sh %sh ", mode, reader.read!ushort, reader.read!ushort);
+        if (mode > 0xB)
+            break;
+    }
+    decompiledBMS.write("\n");
 }
 
 ///A command parser override for 0xA5 that reads 3 bytes of arguments instead of 2 TODO: remove the need for this function
