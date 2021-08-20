@@ -2607,7 +2607,7 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         {
             writer.write(operation);
             writer.write(to!ubyte(strip(instructionargs[2], "b")));
-            writer.write(to!short(strip(instructionargs[3], "h")));
+            writer.write(to!ushort(strip(instructionargs[3], "h")));
             outputBMS.rawWrite(writer.buffer);
             writer.clear();
             return;
