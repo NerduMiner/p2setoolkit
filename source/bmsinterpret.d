@@ -73,6 +73,7 @@ enum BMSFunction : ubyte
     PARAM_CMP_16 = 0xAF,
     OPOVERRIDE_1 = 0xB0, //0xB0-0xBF are command overriders?
     OPOVERRIDE_2 = 0xB1,
+    OPOVERRIDE_4 = 0xB4,
     OPOVERRIDE_R = 0xB8,
     OPENTRACK = 0xC1,
     OPENTRACKBROS = 0xC2,
@@ -230,6 +231,8 @@ ubyte parseOpcode(ubyte opcode)
             return BMSFunction.OPOVERRIDE_1;
         case BMSFunction.OPOVERRIDE_2:
             return BMSFunction.OPOVERRIDE_2;
+        case BMSFunction.OPOVERRIDE_4:
+            return BMSFunction.OPOVERRIDE_4;
         default:
             throw new Exception("UNIMPLEMENTED 0xBX OPCODE IN PARSER: " ~ format!"%02X"(opcode));
         }
@@ -782,7 +785,7 @@ void printBMSInstruction(ubyte opcode, File bmsFile, string mode)
         data.length = 3;
         auto reader = binaryReader(data);
         bmsFile.rawRead(data);
-        writeln("BMS Instruction[Funny 0xB0 opcode]: ", format!"%02X "(opcode),
+        writeln("BMS Instruction[Funny 0xB0]: ", format!"%02X "(opcode),
                 format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)),
                 format!"%02X"(reader.read!(ubyte)));
         return;
@@ -793,6 +796,14 @@ void printBMSInstruction(ubyte opcode, File bmsFile, string mode)
         auto reader = binaryReader(data);
         bmsFile.rawRead(data);
         writefln("BMS Instruction[Funny 0xB1]: %02X %02X %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        return;
+    case BMSFunction.OPOVERRIDE_4: //0xB4
+        //Read overridden opcode[ubyte], argument mask[ubyte(s)?], then 0xB4 argument(s)?[ubyte(s)?]
+        ubyte [] data;
+        data.length = 7;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        writefln("BMS Instruction[Funny 0xB4]: %02X %02X %02X %02X %02X %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
         return;
     case BMSFunction.OPENTRACK: //0xC1
         //Read track id[ubyte] and address[int24]
@@ -1690,6 +1701,13 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         bmsFile.rawRead(data);
         decompiledBMS.writefln("op_override_2 %02X %sb %sb %sb", reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
         return;
+    case BMSFunction.OPOVERRIDE_4: //0xB4
+        ubyte[] data;
+        data.length = 7;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("op_override_4 %02X %sb %sb %sb %sb %sb %sb", reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.OPENTRACK: //0xC1
         //Read track id[ubyte] and address[int24]
         ubyte[] data;
@@ -2335,6 +2353,8 @@ uint findBMSInstByteLength(string line, string mode)
         return 3;
     case "param_cmp_16":
         return 4;
+    case "op_override_4":
+        return 8;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instruction[0] ~ " IN LENGTH PARSER");
     }
@@ -2531,6 +2551,18 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         writer.write(to!ubyte(instructionargs[1], 16)); //Overridden opcode
         writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Argument Mask
         writer.write(to!ubyte(strip(instructionargs[3], "b"))); //Argument for first opcode
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
+    case "op_override_4":
+        writer.write(BMSFunction.OPOVERRIDE_4); //Opcode
+        writer.write(to!ubyte(instructionargs[1], 16)); //Overridden opcode
+        writer.write(to!ubyte(strip(instructionargs[2], "b"))); //Argument Mask
+        writer.write(to!ubyte(strip(instructionargs[3], "b"))); //Argument for first opcode
+        writer.write(to!ubyte(strip(instructionargs[4], "b")));
+        writer.write(to!ubyte(strip(instructionargs[5], "b")));
+        writer.write(to!ubyte(strip(instructionargs[6], "b")));
+        writer.write(to!ubyte(strip(instructionargs[7], "b")));
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;

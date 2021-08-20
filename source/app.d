@@ -64,7 +64,7 @@ int decompileBMS(string filename, string task, string mode) {
     data.length = 1;
     auto reader = binaryReader(data);
     while (!bms.eof()) {
-        /*if(bms.tell() >= 15331) {
+        /*if(bms.tell() >= 56905) {
             readln();
             writeln("At ", format!"%X"(bms.tell), " in file.");
         }*/
