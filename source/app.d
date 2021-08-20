@@ -204,6 +204,12 @@ int recompileBMS(string filename, string mode) {
                 outputPos += 2;
                 //writefln("Current positon: %s", outputPos);
             }
+        } else if (canFind(linebuf, ".data")) {
+            const string[] data = split(linebuf, " ");
+            for (int i = 0; i < data.length - 2; i++) {
+                outputPos += 1;
+                //writefln("Current positon: %s", outputPos);
+            }
         } else {
             //writeln("Found instruction");
             outputPos += findBMSInstByteLength(linebuf, mode);
@@ -244,6 +250,18 @@ int recompileBMS(string filename, string mode) {
             for (int i = 1; i < args.length - 1; i++) {
                 writeln(args[i], " ", i);
                 writer.write(to!ushort(strip(args[i], "h")));
+            }
+            bmsOutput.rawWrite(writer.buffer);
+            writer.clear();
+            continue;
+        }
+        if (canFind(linebuf, ".data"))
+        {
+            string[] data = split(linebuf, " ");
+            BinaryWriter writer = BinaryWriter(ByteOrder.LittleEndian);
+            for (int i = 1; i < data.length - 1; i++) {
+                writeln(data[i], " ", i);
+                writer.write(to!ubyte(data[i], 16));
             }
             bmsOutput.rawWrite(writer.buffer);
             writer.clear();
