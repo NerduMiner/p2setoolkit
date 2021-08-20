@@ -753,6 +753,14 @@ void printBMSInstruction(ubyte opcode, File bmsFile, string mode)
                 format!"%02X "(reader.read!(ubyte)), format!"%02X "(reader.read!(ubyte)),
                 format!"%02X"(reader.read!(ubyte)));
         return;
+    case BMSFunction.PARAM_CMP_16: //0xAF
+        //Read register[ubyte] and value[ushort]
+        ubyte[] data;
+        data.length = 3;
+        auto reader = binaryReader(data);
+        bmsFile.rawRead(data);
+        writefln("BMS Instruction: %02X %02X %02X %02X", opcode, reader.read!ubyte, reader.read!ubyte, reader.read!ubyte);
+        return;
     case BMSFunction.OPOVERRIDE_1: //0xB0
         /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
             writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
@@ -1643,6 +1651,14 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         decompiledBMS.writeln("param_add_16 ", format!"%sb "(reader.read!(ubyte)),
                 format!"%sh"(reader.read!(ushort)));
         return;
+    case BMSFunction.PARAM_CMP_16: //0xAF
+        //Read register[ubyte] and value[ushort]
+        ubyte[] data;
+        data.length = 3;
+        auto reader = binaryReader(data, ByteOrder.BigEndian);
+        bmsFile.rawRead(data);
+        decompiledBMS.writefln("param_cmp_16 %sb %sh", reader.read!ubyte, reader.read!ushort);
+        return;
     case BMSFunction.OPOVERRIDE_1: //0xB0
         /*//0xBX commands have an instruction inside them, so we recursively call this function to find that and return to read arguments
             writeln("BMS Instruction[Next instruction is inside 0xBX instruction]: ", format!"%02X "(opcode));
@@ -2317,6 +2333,8 @@ uint findBMSInstByteLength(string line, string mode)
         return 3;
     case "param_subtract":
         return 3;
+    case "param_cmp_16":
+        return 4;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instruction[0] ~ " IN LENGTH PARSER");
     }
@@ -2882,6 +2900,13 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;
+    case "param_cmp_16":
+        writer.write(BMSFunction.PARAM_CMP_16); //Opcode
+        writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Register
+        writer.write(to!ushort(strip(instructionargs[2], "h"))); //Value
+        outputBMS.rawWrite(writer.buffer);
+        writer.clear();
+        return;
     default:
         throw new Exception("UNIMPLEMENTED INSTRUCTION " ~ instructionargs[0] ~ " IN COMPILER");
     }
@@ -2989,6 +3014,20 @@ void HandleBMSPadding(File bmsFile, BMSDataInfo[] bmsinfo)
         data.length = 1;
         bmsFile.rawRead(data);
     }
+}
+
+///A function that handles padding in a BMS file, outputting a .pad command in the decompile
+void HandleBMSPaddingFile(File bmsFile, File decompiledBMS, BMSDataInfo[] bmsinfo)
+{
+    writeln("BMS PADDING DETECTED: SKIPPING PADDING");
+    decompiledBMS.writefln(".pad %s", bmsinfo[dataInfoPosition].dataLength);
+    for (int i = 0; i < bmsinfo[dataInfoPosition].dataLength; i++)
+    {
+        ubyte[] data;
+        data.length = 1;
+        bmsFile.rawRead(data);
+    }
+    return;
 }
 
 ///A function that handles envelopes in a BMS file, code adapted from https://github.com/XAYRGA/libJAudio/blob/master/libJAudio/Loaders/JA_IBankLoader_V1.cs#L170

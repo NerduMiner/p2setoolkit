@@ -99,7 +99,11 @@ int decompileBMS(string filename, string task, string mode) {
                 }
             }
             if (bmsInfo[dataInfoPosition].dataType == "padding") {
-                HandleBMSPadding(bms, bmsInfo);
+                if (task == "print") {
+                    HandleBMSPadding(bms, bmsInfo);
+                } else if (task == "decompile") {
+                    HandleBMSPaddingFile(bms, decompiledBMS, bmsInfo);
+                }
             }
             if (bmsInfo[dataInfoPosition].dataType == "a5_3bytearg_override") {
                 bms.rawRead(data);
