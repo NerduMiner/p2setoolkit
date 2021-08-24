@@ -32,3 +32,4 @@ You will need to have a good understanding of BMS opcodes and how they work if y
 
 Thanks to XAYRGA, RenolY2, and arookas for their resources and guidance on BMS intricacies in the creation of this tool. 
 <br/>Thanks to PikHacker for helping with reverse engineering Pikmin 2's sound system.
+<br/>Thanks to Robert Pasiński for the pack-d binary i/o library https://code.dlang.org/packages/pack-d
