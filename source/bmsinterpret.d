@@ -2207,8 +2207,15 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         data.length = 4;
         auto reader = binaryReader(data, ByteOrder.BigEndian);
         bmsFile.rawRead(data);
-        decompiledBMS.writeln("setinterrupt ", format!"%sb "(reader.read!(ubyte)),
-                format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
+        decompiledBMS.write("setinterrupt ", format!"%sb "(reader.read!(ubyte)));
+        const int address = ((reader.read!(ubyte) << 16) | reader.read!(ushort)); //Label time
+        if(!canFind(*decompiledLabels, BMSLabel(("INT_" ~ format!"%s"(address) ~ "q:"), address)))
+        {
+               *decompiledLabels ~= BMSLabel(("INT_" ~ format!"%s"(address) ~ "q:"), address);
+        }
+        decompiledBMS.writefln("@INT_%sq", address);
+        //decompiledBMS.writeln("setinterrupt ", format!"%sb "(reader.read!(ubyte)),
+        //        format!"%sq"((reader.read!(ubyte) << 16) | reader.read!(ushort)));
         return;
     case BMSFunction.CLRI: //0xE1
         //Apparently has no arguments
@@ -2776,7 +2783,8 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
     case "setinterrupt":
         writer.write(BMSFunction.SETINTERRUPT); //Opcode
         writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Interrupt Level
-        writeInt24(&writer, to!uint(strip(instructionargs[2], "q"))); //Address
+        writeInt24(&writer, to!uint(labels[strip(instructionargs[2], "@")])); //Address
+        //writeInt24(&writer, to!uint(strip(instructionargs[2], "q"))); //Address
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;
