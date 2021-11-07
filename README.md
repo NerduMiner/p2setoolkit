@@ -7,11 +7,14 @@ The tool, with overrides for some 0xA5 and 0xA8 instructions, can parse the enti
 p2setoolkit requires a D compiler(DMD is recommended), downloads can be found at https://dlang.org/.<br/>Once installed, run `dub build` in your CLI/Terminal in the root directory of the repository to compile the project.
 
 # Usage
-Run the executable in CLI/Terminal. The desired bms/dissassembled bms file you wish to handle with the tool and what task you would like to do needs to be put in the arguments like so:
-<br/>`p2setoolkit --input [filename.bms/filename.bms.txt] --task [print/decompile]`
+Run the executable in CLI/Terminal. The desired bms/dissassembled bms file you wish to handle with the tool, what task you would like to do, and optionally, the JAudio standard needs to be put in the arguments like so:
+<br/>`p2setoolkit [filename.bms/filename.bms.txt] [print/decompile] [jv1pikmin2/jv1standard]`
 <br/>"print" makes the tool print out every BMS Instruction in the file, useful for debugging purposes and making sure the tool can successfully decompile the file.
 <br/>"decompile" decompiles the byte code into a dissassembled text format, similar to flaafy's cotton format besides a few verbosities.
 <br/>The task argument is not needed if you are reassembling a decompiled BMS file.
+<br/>The 3rd argument is for specifying a JAudio standard, which changes how certain instructions are decompiled and recompiled.
+<br/>"jv1pikmin2" is the standard used in Pikmin 2, it is set as the default, so you don't need to set it if you are working with Pikmin 2 BMS files.
+<br/>"jv1standard" is the standard used in games like Luigi's Mansion, etc., use this standard if you are working with BMS files from games other than Pikmin 2.
 
 # .info file
 YOU WILL NEED TO CREATE A [filename.bms].info FILE FOR THE PROGRAM TO RUN IN DECOMPILE MODE. This is due to the fact that there can be arbitrary data in a file that is hard for the tool to detect, or 0xA5 and 0xA8 instructions that only take 3 bytes of arguments instead of 4(for reasons yet unknown as of 8/11/2021).
@@ -24,7 +27,7 @@ data -> Override type[data/padding/a5_3byte_override/a8_3byte_override/jumptable
 0 -> Length of padding[Only applicable for jumptable, optional]
 ```
 
-An example .info file for Pikmin 2's se.bms is provided in this repository. DATA AND PADDING ARE NOT AVAILABLE FOR USE IN THE DECOMPILE TASK.
+An example .info file for Pikmin 2's se.bms is provided in this repository.
 
 # NOTICE
 You will need to have a good understanding of BMS opcodes and how they work if you want to use this tool effectively, you can look at bmsinterpret.d to see how opcodes are defined but that can only take you so far, this is mainly due to a lack of info in the scene about BMS files and their intricacies.
