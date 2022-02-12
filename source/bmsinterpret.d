@@ -1901,7 +1901,7 @@ void decompileBMSInstruction(ubyte opcode, File bmsFile, File decompiledBMS,
         auto reader = binaryReader(data, ByteOrder.BigEndian);
         bmsFile.rawRead(data);
         decompiledBMS.writeln("param_add_16 ", format!"%sb "(reader.read!(ubyte)),
-                format!"%sh"(reader.read!(ushort)));
+                format!"%sh"(reader.read!(short)));
         return;
     case BMSFunction.PARAM_CMP_16: //0xAF
         //Read register[ubyte] and value[ushort]
@@ -2893,7 +2893,7 @@ void compileBMSInstruction(File outputBMS, string instruction, ulong[string] lab
     case "param_add_16":
         writer.write(BMSFunction.PARAM_ADD_16); //Opcode
         writer.write(to!ubyte(strip(instructionargs[1], "b"))); //Register
-        writer.write(to!ushort(strip(instructionargs[2], "h"))); //Value
+        writer.write(to!short(strip(instructionargs[2], "h"))); //Value
         outputBMS.rawWrite(writer.buffer);
         writer.clear();
         return;
